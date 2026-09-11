@@ -66,9 +66,7 @@
 ### 🪄 One-Liner Install
 
 ```bash
-git clone https://github.com/Praveensenpai/server-chronicle.git
-cd server-chronicle
-./install.sh
+curl -fsSL https://raw.githubusercontent.com/Praveensenpai/server-chronicle/main/remote-install.sh | bash
 ```
 
 ---
