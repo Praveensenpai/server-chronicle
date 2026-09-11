@@ -153,7 +153,15 @@ fn read_coretemp_package() -> Option<f64> {
 }
 
 fn read_fan_speed() -> Option<u32> {
-    // Search both /sys/class/hwmon/hwmonN/ directly and any device/ subdirectory
+    // Primary: read fan RPM directly from the Embedded Controller (EC) registers.
+    // On the HP Laptop 14q-cs0xxx, the standard hwmon/hp driver exposes only
+    // pwm1_enable with no fan tachometer input — the EC holds the actual RPM at
+    // offset 0x70–0x71 as a 16-bit big-endian value.
+    if let Some(rpm) = read_fan_speed_from_ec() {
+        return Some(rpm);
+    }
+
+    // Fallback: scan hwmon fan*_input files (works on other hardware).
     let hwmons = fs::read_dir("/sys/class/hwmon").ok()?;
     let mut max_rpm: Option<u32> = None;
 
@@ -170,7 +178,9 @@ fn read_fan_speed() -> Option<u32> {
                 if fname.starts_with("fan") && fname.ends_with("_input") {
                     if let Ok(raw) = fs::read_to_string(entry.path()) {
                         if let Ok(rpm) = raw.trim().parse::<u32>() {
-                            max_rpm = Some(max_rpm.map_or(rpm, |cur| cur.max(rpm)));
+                            if rpm > 0 {
+                                max_rpm = Some(max_rpm.map_or(rpm, |cur| cur.max(rpm)));
+                            }
                         }
                     }
                 }
@@ -179,6 +189,34 @@ fn read_fan_speed() -> Option<u32> {
     }
 
     max_rpm
+}
+
+/// Read fan RPM from the HP Embedded Controller register space.
+///
+/// The EC IO space is exposed at `/sys/kernel/debug/ec/ec0/io` (256 bytes) by
+/// the `ec_sys` kernel module.  On the HP 14q-cs0xxx the fan tachometer is a
+/// 16-bit big-endian value stored at offset 0x70.  A value of 0 means the fan
+/// has stopped (or the EC hasn't populated the register yet), so we return
+/// `None` in that case to avoid displaying a misleading zero.
+fn read_fan_speed_from_ec() -> Option<u32> {
+    const EC_IO_PATH: &str = "/sys/kernel/debug/ec/ec0/io";
+    const FAN_OFFSET: usize = 0x70;
+
+    let data = fs::read(EC_IO_PATH).ok()?;
+    if data.len() <= FAN_OFFSET + 1 {
+        return None;
+    }
+
+    let high = data[FAN_OFFSET] as u32;
+    let low = data[FAN_OFFSET + 1] as u32;
+    let rpm = (high << 8) | low; // big-endian u16
+
+    if rpm == 0 || rpm > 20_000 {
+        // 0 = fan stopped or register unpopulated; >20 000 is clearly bogus
+        return None;
+    }
+
+    Some(rpm)
 }
 
 fn read_hostname() -> String {
