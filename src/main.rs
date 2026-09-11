@@ -11,7 +11,7 @@ use clap::{Parser, Subcommand};
 #[derive(Parser)]
 #[command(name = "server-chronicle")]
 #[command(author = "Praveensenpai <pvnt20@gmail.com>")]
-#[command(version = "0.1.0")]
+#[command(version)]
 #[command(about = "⏱️ Server activity logger, battery UPS monitor, and AI context generator")]
 struct Cli {
     #[command(subcommand)]
