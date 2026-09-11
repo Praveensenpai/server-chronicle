@@ -23,7 +23,7 @@ pub fn render_telemetry(
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
-            Constraint::Length(8),  // Gauges
+            Constraint::Length(7),  // Gauges
             Constraint::Length(10), // Containers & SSH
             Constraint::Min(8),     // Top Processes
         ])
@@ -121,6 +121,25 @@ fn render_cpu_gauge(frame: &mut Frame, area: Rect, sys: &crate::domain::models::
     } else {
         COLOR_PRIMARY
     };
+
+    let temp_color = sys.cpu_temp_c.map_or(COLOR_MUTED, |t| {
+        if t >= 90.0 { COLOR_DANGER } else if t >= 70.0 { COLOR_WARNING } else { COLOR_SUCCESS }
+    });
+
+    let temp_str = sys.cpu_temp_c
+        .map_or_else(|| "N/A".to_string(), |t| format!("{t:.1}°C"));
+    let fan_str = sys.fan_speed_rpm
+        .map_or_else(|| "N/A".to_string(), |r| format!("{r} RPM"));
+    let cores_str = if sys.cpu_core_temps_c.is_empty() {
+        String::new()
+    } else {
+        sys.cpu_core_temps_c
+            .iter()
+            .map(|t| format!("{t:.0}°"))
+            .collect::<Vec<_>>()
+            .join("  ")
+    };
+
     let block = Block::default()
         .borders(Borders::ALL)
         .title(" ⚡ CPU Load ");
@@ -130,7 +149,7 @@ fn render_cpu_gauge(frame: &mut Frame, area: Rect, sys: &crate::domain::models::
         return;
     }
 
-    // Row 0: usage gauge
+    // Row 0: bar
     let gauge_area = Rect::new(inner.x, inner.y, inner.width, 1);
     let gauge = Gauge::default()
         .gauge_style(Style::default().fg(color))
@@ -144,63 +163,31 @@ fn render_cpu_gauge(frame: &mut Frame, area: Rect, sys: &crate::domain::models::
         ));
     frame.render_widget(gauge, gauge_area);
 
-    // Row 1: blank spacer (the block border takes row 0 of inner, gauge is row 1)
-    // Rows 2+: temperature and fan details
-    let temp_color = sys.cpu_temp_c.map_or(COLOR_MUTED, |t| {
-        if t >= 90.0 {
-            COLOR_DANGER
-        } else if t >= 70.0 {
-            COLOR_WARNING
-        } else {
-            COLOR_SUCCESS
+    // Row 2+: details (skip row 1 as spacer, matching compact gauge)
+    if inner.height > 2 {
+        let mut lines: Vec<Line> = vec![
+            Line::from(vec![
+                Span::styled(" 🌡 ", Style::default().fg(COLOR_MUTED)),
+                Span::styled(temp_str, Style::default().fg(temp_color).add_modifier(Modifier::BOLD)),
+                Span::styled("   🌀 ", Style::default().fg(COLOR_MUTED)),
+                Span::styled(fan_str, Style::default().fg(COLOR_MUTED)),
+            ]),
+        ];
+        if !cores_str.is_empty() {
+            lines.push(Line::from(vec![
+                Span::styled(" cores: ", Style::default().fg(COLOR_MUTED)),
+                Span::styled(cores_str, Style::default().fg(COLOR_MUTED)),
+            ]));
         }
-    });
-
-    let temp_str = sys
-        .cpu_temp_c
-        .map_or_else(|| "N/A".to_string(), |t| format!("{t:.1}°C"));
-
-    let fan_str = sys
-        .fan_speed_rpm
-        .map_or_else(|| "N/A".to_string(), |r| format!("{r} RPM"));
-
-    // Build core temps string (e.g. "42° 44° 41° 43°")
-    let cores_str = if sys.cpu_core_temps_c.is_empty() {
-        String::new()
-    } else {
-        sys.cpu_core_temps_c
-            .iter()
-            .map(|t| format!("{t:.0}°"))
-            .collect::<Vec<_>>()
-            .join(" ")
-    };
-
-    let mut lines: Vec<Line> = vec![
-        Line::from(vec![
-            Span::styled("🌡 Temp: ", Style::default().fg(COLOR_MUTED)),
-            Span::styled(temp_str, Style::default().fg(temp_color).add_modifier(Modifier::BOLD)),
-        ]),
-        Line::from(vec![
-            Span::styled("🌀 Fan:  ", Style::default().fg(COLOR_MUTED)),
-            Span::styled(fan_str, Style::default().fg(COLOR_MUTED)),
-        ]),
-    ];
-
-    if !cores_str.is_empty() {
-        lines.push(Line::from(vec![
-            Span::styled("   Core: ", Style::default().fg(COLOR_MUTED)),
-            Span::styled(cores_str, Style::default().fg(COLOR_MUTED)),
-        ]));
+        let avail = inner.height.saturating_sub(2);
+        let details_area = Rect::new(
+            inner.x,
+            inner.y + 2,
+            inner.width,
+            (lines.len() as u16).min(avail),
+        );
+        frame.render_widget(Paragraph::new(lines), details_area);
     }
-
-    let details_area = Rect::new(
-        inner.x,
-        inner.y.saturating_add(2),
-        inner.width,
-        lines.len() as u16,
-    );
-    let details = Paragraph::new(lines);
-    frame.render_widget(details, details_area);
 }
 
 fn render_containers_and_ssh(frame: &mut Frame, area: Rect, snapshot: &ServerSnapshot) {

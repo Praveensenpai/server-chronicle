@@ -22,6 +22,8 @@ pub fn render_compact_gauge(
     percent: u16,
     label: String,
 ) {
+    use ratatui::{text::Line, widgets::Paragraph};
+
     let block = Block::default().borders(Borders::ALL).title(title);
     let inner = block.inner(area);
     frame.render_widget(block, area);
@@ -30,21 +32,27 @@ pub fn render_compact_gauge(
         return;
     }
 
-    let gauge_area = Rect::new(
-        inner.x,
-        inner.y + inner.height.saturating_sub(1) / 2,
-        inner.width,
-        1,
-    );
+    // Bar always at the top row of the inner area
+    let gauge_area = Rect::new(inner.x, inner.y, inner.width, 1);
     let gauge = Gauge::default()
         .gauge_style(Style::default().fg(color))
         .percent(percent)
         .label(Span::styled(
-            label,
+            label.clone(),
             Style::default()
                 .fg(Color::Black)
                 .bg(color)
                 .add_modifier(Modifier::BOLD),
         ));
     frame.render_widget(gauge, gauge_area);
+
+    // Percentage text on the line below the bar
+    if inner.height > 2 {
+        let text_area = Rect::new(inner.x, inner.y + 2, inner.width, 1);
+        let p = Paragraph::new(Line::from(Span::styled(
+            format!(" {label}"),
+            Style::default().fg(color).add_modifier(Modifier::BOLD),
+        )));
+        frame.render_widget(p, text_area);
+    }
 }
