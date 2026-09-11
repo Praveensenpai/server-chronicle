@@ -207,23 +207,50 @@ fn read_hwmon_pwm_status() -> Option<String> {
 }
 
 fn read_fan_speed_from_ec() -> Option<u32> {
-    const EC_IO_PATH: &str = "/sys/kernel/debug/ec/ec0/io";
-    const FAN_OFFSET: usize = 0x70;
+    let paths = [
+        "/sys/kernel/debug/ec/ec0/io",
+        "/run/ec_fan_rpm_io",
+        "/dev/shm/ec_fan_rpm_io",
+    ];
 
-    let data = fs::read(EC_IO_PATH).ok()?;
-    if data.len() <= FAN_OFFSET + 1 {
-        return None;
+    for path in &paths {
+        if let Ok(data) = fs::read(path) {
+            if let Some(rpm) = parse_ec_fan_rpm(&data) {
+                return Some(rpm);
+            }
+        }
     }
 
-    let high = data[FAN_OFFSET] as u32;
-    let low = data[FAN_OFFSET + 1] as u32;
-    let rpm = (high << 8) | low;
-
-    if rpm == 0 || rpm > 20_000 {
-        return None;
+    for text_path in &["/run/ec_fan_rpm", "/dev/shm/ec_fan_rpm"] {
+        if let Ok(text) = fs::read_to_string(text_path) {
+            if let Ok(rpm) = text.trim().parse::<u32>() {
+                if (100..=15_000).contains(&rpm) {
+                    return Some(rpm);
+                }
+            }
+        }
     }
 
-    Some(rpm)
+    None
+}
+
+pub fn parse_ec_fan_rpm(data: &[u8]) -> Option<u32> {
+    for &offset in &[0x70, 0x7E] {
+        if data.len() > offset + 1 {
+            let b0 = data[offset];
+            let b1 = data[offset + 1];
+            // HP EC registers store 16-bit fan tachometer in little-endian (e.g. 0xd8 0x09 = 2520 RPM)
+            let rpm_le = u16::from_le_bytes([b0, b1]) as u32;
+            if (300..=12_000).contains(&rpm_le) {
+                return Some(rpm_le);
+            }
+            let rpm_be = u16::from_be_bytes([b0, b1]) as u32;
+            if (300..=12_000).contains(&rpm_be) {
+                return Some(rpm_be);
+            }
+        }
+    }
+    None
 }
 
 #[cfg(test)]
@@ -239,5 +266,20 @@ mod tests {
         } else {
             assert!(!status.is_empty());
         }
+    }
+
+    #[test]
+    fn test_parse_ec_fan_rpm_little_endian() {
+        let mut data = vec![0u8; 256];
+        // 0x70: d8 09 -> 0x09D8 = 2520 RPM
+        data[0x70] = 0xd8;
+        data[0x71] = 0x09;
+        assert_eq!(parse_ec_fan_rpm(&data), Some(2520));
+
+        // 0x7E: c4 09 -> 0x09C4 = 2500 RPM
+        let mut data_alt = vec![0u8; 256];
+        data_alt[0x7E] = 0xc4;
+        data_alt[0x7F] = 0x09;
+        assert_eq!(parse_ec_fan_rpm(&data_alt), Some(2500));
     }
 }
