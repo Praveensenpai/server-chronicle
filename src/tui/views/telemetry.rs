@@ -7,10 +7,12 @@ use ratatui::{
 };
 
 use super::render_compact_gauge;
+use super::services::render_containers_and_ssh;
 use crate::domain::battery_types::BatterySnapshot;
 use crate::domain::models::ServerSnapshot;
 use crate::tui::theme::{
-    COLOR_DANGER, COLOR_MUTED, COLOR_PRIMARY, COLOR_SECONDARY, COLOR_SUCCESS, COLOR_WARNING,
+    COLOR_BORDER, COLOR_DANGER, COLOR_MUTED, COLOR_PRIMARY, COLOR_SECONDARY, COLOR_SUCCESS,
+    COLOR_WARNING,
 };
 
 pub fn render_telemetry(
@@ -123,12 +125,20 @@ fn render_cpu_gauge(frame: &mut Frame, area: Rect, sys: &crate::domain::models::
     };
 
     let temp_color = sys.cpu_temp_c.map_or(COLOR_MUTED, |t| {
-        if t >= 90.0 { COLOR_DANGER } else if t >= 70.0 { COLOR_WARNING } else { COLOR_SUCCESS }
+        if t >= 90.0 {
+            COLOR_DANGER
+        } else if t >= 70.0 {
+            COLOR_WARNING
+        } else {
+            COLOR_SUCCESS
+        }
     });
 
-    let temp_str = sys.cpu_temp_c
+    let temp_str = sys
+        .cpu_temp_c
         .map_or_else(|| "N/A".to_string(), |t| format!("{t:.1}°C"));
-    let fan_str = sys.fan_speed_rpm
+    let fan_str = sys
+        .fan_speed_rpm
         .map_or_else(|| "N/A".to_string(), |r| format!("{r} RPM"));
     let cores_str = if sys.cpu_core_temps_c.is_empty() {
         String::new()
@@ -142,6 +152,7 @@ fn render_cpu_gauge(frame: &mut Frame, area: Rect, sys: &crate::domain::models::
 
     let block = Block::default()
         .borders(Borders::ALL)
+        .border_style(Style::default().fg(COLOR_BORDER))
         .title(" ⚡ CPU Load ");
     let inner = block.inner(area);
     frame.render_widget(block, area);
@@ -165,14 +176,15 @@ fn render_cpu_gauge(frame: &mut Frame, area: Rect, sys: &crate::domain::models::
 
     // Row 2+: details (skip row 1 as spacer, matching compact gauge)
     if inner.height > 2 {
-        let mut lines: Vec<Line> = vec![
-            Line::from(vec![
-                Span::styled(" 🌡 ", Style::default().fg(COLOR_MUTED)),
-                Span::styled(temp_str, Style::default().fg(temp_color).add_modifier(Modifier::BOLD)),
-                Span::styled("   🌀 ", Style::default().fg(COLOR_MUTED)),
-                Span::styled(fan_str, Style::default().fg(COLOR_MUTED)),
-            ]),
-        ];
+        let mut lines: Vec<Line> = vec![Line::from(vec![
+            Span::styled(" 🌡 ", Style::default().fg(COLOR_MUTED)),
+            Span::styled(
+                temp_str,
+                Style::default().fg(temp_color).add_modifier(Modifier::BOLD),
+            ),
+            Span::styled("   🌀 ", Style::default().fg(COLOR_MUTED)),
+            Span::styled(fan_str, Style::default().fg(COLOR_MUTED)),
+        ])];
         if !cores_str.is_empty() {
             lines.push(Line::from(vec![
                 Span::styled(" cores: ", Style::default().fg(COLOR_MUTED)),
@@ -190,100 +202,23 @@ fn render_cpu_gauge(frame: &mut Frame, area: Rect, sys: &crate::domain::models::
     }
 }
 
-fn render_containers_and_ssh(frame: &mut Frame, area: Rect, snapshot: &ServerSnapshot) {
-    let cols = Layout::default()
-        .direction(Direction::Horizontal)
-        .constraints([Constraint::Percentage(60), Constraint::Percentage(40)])
-        .split(area);
-
-    // Docker Containers Table
-    let rows: Vec<Row> = snapshot
-        .containers
-        .iter()
-        .map(|c| {
-            Row::new(vec![
-                c.name.clone(),
-                c.status.clone(),
-                format!("{:.1}%", c.cpu_percent),
-                c.memory_usage.clone(),
-            ])
-        })
-        .collect();
-
-    let table = Table::new(
-        rows,
-        [
-            Constraint::Percentage(30),
-            Constraint::Percentage(35),
-            Constraint::Percentage(15),
-            Constraint::Percentage(20),
-        ],
-    )
-    .header(
-        Row::new(vec!["Container", "Status", "CPU", "Memory"]).style(
-            Style::default()
-                .fg(COLOR_PRIMARY)
-                .add_modifier(Modifier::BOLD),
-        ),
-    )
-    .block(
-        Block::default()
-            .borders(Borders::ALL)
-            .title(" 🐳 Docker Containers "),
-    );
-
-    frame.render_widget(table, cols[0]);
-
-    // SSH Sessions List
-    let mut ssh_lines = Vec::new();
-    if snapshot.ssh_sessions.is_empty() {
-        ssh_lines.push(ratatui::text::Line::from(
-            "  No remote SSH sessions connected.",
-        ));
-    } else {
-        for s in &snapshot.ssh_sessions {
-            ssh_lines.push(ratatui::text::Line::from(vec![
-                ratatui::text::Span::styled(
-                    format!("  👤 {} ", s.user),
-                    Style::default()
-                        .fg(COLOR_SUCCESS)
-                        .add_modifier(Modifier::BOLD),
-                ),
-                ratatui::text::Span::styled(
-                    format!("from {} ", s.client_ip),
-                    Style::default().fg(COLOR_PRIMARY),
-                ),
-                ratatui::text::Span::styled(
-                    format!("({})", s.tty_or_port),
-                    Style::default().fg(COLOR_MUTED),
-                ),
-            ]));
-        }
-    }
-
-    let p = Paragraph::new(ssh_lines).block(
-        Block::default()
-            .borders(Borders::ALL)
-            .title(" 👤 Active SSH Sessions "),
-    );
-    frame.render_widget(p, cols[1]);
-}
-
 fn render_processes(frame: &mut Frame, area: Rect, snapshot: &ServerSnapshot, selected: usize) {
     let rows: Vec<Row> = snapshot
         .top_processes
         .iter()
         .enumerate()
         .map(|(i, p)| {
-            let style = if i == selected {
+            let is_sel = i == selected;
+            let cursor = if is_sel { "▶ " } else { "  " };
+            let style = if is_sel {
                 Style::default()
                     .fg(COLOR_PRIMARY)
-                    .add_modifier(Modifier::REVERSED)
+                    .add_modifier(Modifier::BOLD | Modifier::REVERSED)
             } else {
                 Style::default()
             };
             Row::new(vec![
-                p.pid.to_string(),
+                format!("{cursor}{}", p.pid),
                 p.name.clone(),
                 format!("{:.1}%", p.cpu_percent),
                 format!("{:.1}%", p.mem_percent),
@@ -295,14 +230,14 @@ fn render_processes(frame: &mut Frame, area: Rect, snapshot: &ServerSnapshot, se
     let table = Table::new(
         rows,
         [
-            Constraint::Length(8),
+            Constraint::Length(10),
             Constraint::Percentage(50),
             Constraint::Percentage(20),
             Constraint::Percentage(20),
         ],
     )
     .header(
-        Row::new(vec!["PID", "Process Name", "CPU %", "MEM %"]).style(
+        Row::new(vec!["  PID", "Process Name", "CPU %", "MEM %"]).style(
             Style::default()
                 .fg(COLOR_SECONDARY)
                 .add_modifier(Modifier::BOLD),
@@ -311,6 +246,7 @@ fn render_processes(frame: &mut Frame, area: Rect, snapshot: &ServerSnapshot, se
     .block(
         Block::default()
             .borders(Borders::ALL)
+            .border_style(Style::default().fg(COLOR_BORDER))
             .title(" ⚙️ Top Resource Processes (Press 'K' to kill) "),
     );
 

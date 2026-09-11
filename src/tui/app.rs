@@ -94,32 +94,51 @@ impl App {
 
     pub fn export_ai_prompt(&mut self) {
         let report = generate_ai_report(&self.snapshot, &self.battery, &self.events);
-        // Try clipboard export via wl-copy or xclip
+
+        // 1. Emit OSC 52 sequence so terminal clipboard captures it (even over remote SSH)
+        let osc52 = format!("\x1b]52;c;{}\x07", to_base64(report.as_bytes()));
+        use std::io::Write;
+        let _ = std::io::stdout().write_all(osc52.as_bytes());
+        let _ = std::io::stdout().flush();
+
+        // 2. Try desktop clipboard via wl-copy or xclip
         let mut copied = false;
         if let Ok(mut child) = Command::new("wl-copy")
             .stdin(std::process::Stdio::piped())
             .spawn()
         {
             if let Some(mut stdin) = child.stdin.take() {
-                use std::io::Write;
                 let _ = stdin.write_all(report.as_bytes());
                 copied = true;
             }
         }
 
+        if !copied {
+            if let Ok(mut child) = Command::new("xclip")
+                .args(["-selection", "clipboard"])
+                .stdin(std::process::Stdio::piped())
+                .spawn()
+            {
+                if let Some(mut stdin) = child.stdin.take() {
+                    let _ = stdin.write_all(report.as_bytes());
+                    copied = true;
+                }
+            }
+        }
+
+        // 3. Always write to latest_export.md as permanent fallback
+        let home = std::env::var("HOME").unwrap_or_else(|_| "/root".to_string());
+        let path =
+            std::path::Path::new(&home).join(".local/share/server-chronicle/latest_export.md");
+        if let Some(p) = path.parent() {
+            let _ = std::fs::create_dir_all(p);
+        }
+        let _ = std::fs::write(&path, &report);
+
         if copied {
-            self.set_status("✨ Exported today's chronicle to clipboard (wl-copy)!".to_string());
+            self.set_status("✨ Exported to clipboard & latest_export.md!".to_string());
         } else {
-            // Write to ~/.local/share/server-chronicle/latest_export.md
-            let home = std::env::var("HOME").unwrap_or_else(|_| "/root".to_string());
-            let path =
-                std::path::Path::new(&home).join(".local/share/server-chronicle/latest_export.md");
-            if let Some(p) = path.parent() {
-                let _ = std::fs::create_dir_all(p);
-            }
-            if std::fs::write(&path, report).is_ok() {
-                self.set_status("✨ Exported chronicle to latest_export.md!".to_string());
-            }
+            self.set_status("✨ Copied via OSC52 & saved to latest_export.md!".to_string());
         }
     }
 
@@ -133,5 +152,45 @@ impl App {
                 self.status_message = None;
             }
         }
+    }
+}
+
+#[must_use]
+pub fn to_base64(bytes: &[u8]) -> String {
+    const CHARSET: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    let mut out = String::with_capacity(bytes.len().div_ceil(3) * 4);
+    for chunk in bytes.chunks(3) {
+        let b0 = chunk[0] as usize;
+        let b1 = chunk.get(1).copied().unwrap_or(0) as usize;
+        let b2 = chunk.get(2).copied().unwrap_or(0) as usize;
+
+        let triple = (b0 << 16) | (b1 << 8) | b2;
+        out.push(CHARSET[(triple >> 18) & 0x3F] as char);
+        out.push(CHARSET[(triple >> 12) & 0x3F] as char);
+        if chunk.len() > 1 {
+            out.push(CHARSET[(triple >> 6) & 0x3F] as char);
+        } else {
+            out.push('=');
+        }
+        if chunk.len() > 2 {
+            out.push(CHARSET[triple & 0x3F] as char);
+        } else {
+            out.push('=');
+        }
+    }
+    out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_to_base64() {
+        assert_eq!(to_base64(b""), "");
+        assert_eq!(to_base64(b"f"), "Zg==");
+        assert_eq!(to_base64(b"fo"), "Zm8=");
+        assert_eq!(to_base64(b"foo"), "Zm9v");
+        assert_eq!(to_base64(b"Hello World!"), "SGVsbG8gV29ybGQh");
     }
 }

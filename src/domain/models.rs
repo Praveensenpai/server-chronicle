@@ -42,10 +42,126 @@ pub enum ServerActivityEvent {
         metric: String,
         value: f64,
         threshold: f64,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        offender: Option<String>,
+    },
+    SystemStartup {
+        version: String,
+        hostname: String,
+        uptime_secs: u64,
+    },
+    SystemHeartbeat {
+        summary: String,
+    },
+    ThermalAlert {
+        temp_c: f64,
+        threshold_c: f64,
+    },
+    DiskMilestone {
+        path: String,
+        percent: f64,
+        threshold: f64,
     },
     GenericNote {
         message: String,
     },
+}
+
+impl ServerActivityEvent {
+    #[must_use]
+    pub fn summary(&self) -> String {
+        match self {
+            Self::SystemStartup {
+                version,
+                hostname,
+                uptime_secs,
+            } => {
+                format!(
+                    "Daemon v{version} online on {hostname} (uptime {}h {}m)",
+                    uptime_secs / 3600,
+                    (uptime_secs % 3600) / 60
+                )
+            }
+            Self::SystemHeartbeat { summary } => summary.clone(),
+            Self::BatteryStateChanged {
+                from_status,
+                to_status,
+                capacity,
+            } => {
+                format!("{from_status} ➔ {to_status} ({capacity}%)")
+            }
+            Self::BatteryBracketCompleted {
+                bracket,
+                duration_secs,
+                rate_pct_per_hour,
+            } => {
+                format!(
+                    "{bracket} in {}m {}s ({rate_pct_per_hour:.1}%/hr)",
+                    duration_secs / 60,
+                    duration_secs % 60
+                )
+            }
+            Self::PowerOutageAlert {
+                capacity,
+                estimated_runtime_mins,
+            } => {
+                format!("AC Lost! Battery at {capacity}%, ~{estimated_runtime_mins}m left")
+            }
+            Self::PowerRestoredAlert { capacity } => {
+                format!("AC Power Restored! Capacity: {capacity}%")
+            }
+            Self::ThermalAlert {
+                temp_c,
+                threshold_c,
+            } => {
+                format!(
+                    "CPU thermal alert: {temp_c:.1}°C exceeded safe ceiling ({threshold_c:.1}°C)"
+                )
+            }
+            Self::DiskMilestone {
+                path,
+                percent,
+                threshold,
+            } => {
+                format!("Disk milestone: {path} reached {percent:.1}% (threshold {threshold:.1}%)")
+            }
+            Self::SshLogin { user, client_ip } => {
+                format!("SSH login from {user}@{client_ip}")
+            }
+            Self::SshLogout {
+                user,
+                client_ip,
+                duration_secs,
+            } => {
+                format!(
+                    "SSH closed: {user}@{client_ip} (active {}m)",
+                    duration_secs / 60
+                )
+            }
+            Self::ContainerStateChanged { name, status } => {
+                format!("Container {name}: {status}")
+            }
+            Self::TorrentCompleted { name, size_bytes } => {
+                format!(
+                    "Downloaded {name} ({:.1} GB)",
+                    *size_bytes as f64 / 1_000_000_000.0
+                )
+            }
+            Self::ResourceSpike {
+                metric,
+                value,
+                threshold,
+                offender,
+            } => {
+                if let Some(off) = offender {
+                    format!("{metric} spike: {value:.1}% > {threshold:.1}% (top: {off})")
+                } else {
+                    format!("{metric} spike: {value:.1}% > {threshold:.1}%")
+                }
+            }
+            Self::GenericNote { message } => message.clone(),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -142,4 +258,87 @@ pub struct ServerSnapshot {
     pub ssh_sessions: Vec<SshSession>,
     pub torrents: Vec<TorrentSnapshot>,
     pub top_processes: Vec<ProcessItem>,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_system_metrics_percentages() {
+        let metrics = SystemMetrics {
+            mem_used_bytes: 4 * 1024 * 1024 * 1024,
+            mem_total_bytes: 8 * 1024 * 1024 * 1024,
+            disk_used_bytes: 50 * 1000 * 1000 * 1000,
+            disk_total_bytes: 100 * 1000 * 1000 * 1000,
+            ..Default::default()
+        };
+        assert!((metrics.mem_percent() - 50.0).abs() < 0.01);
+        assert!((metrics.disk_percent() - 50.0).abs() < 0.01);
+
+        let zero_metrics = SystemMetrics::default();
+        assert_eq!(zero_metrics.mem_percent(), 0.0);
+        assert_eq!(zero_metrics.disk_percent(), 0.0);
+    }
+
+    #[test]
+    fn test_event_roundtrip_serde() {
+        let events = vec![
+            ServerActivityEvent::PowerOutageAlert {
+                capacity: 85,
+                estimated_runtime_mins: 120,
+            },
+            ServerActivityEvent::PowerRestoredAlert { capacity: 90 },
+            ServerActivityEvent::SshLogin {
+                user: "neko".to_string(),
+                client_ip: "100.108.154.50".to_string(),
+            },
+            ServerActivityEvent::SshLogout {
+                user: "neko".to_string(),
+                client_ip: "100.108.154.50".to_string(),
+                duration_secs: 3600,
+            },
+            ServerActivityEvent::ContainerStateChanged {
+                name: "qbittorrent".to_string(),
+                status: "Up 2 hours".to_string(),
+            },
+            ServerActivityEvent::TorrentCompleted {
+                name: "test.iso".to_string(),
+                size_bytes: 1024,
+            },
+            ServerActivityEvent::ResourceSpike {
+                metric: "RAM".to_string(),
+                value: 95.5,
+                threshold: 90.0,
+                offender: Some("ffmpeg (PID 14210)".to_string()),
+            },
+            ServerActivityEvent::SystemStartup {
+                version: "0.1.8".to_string(),
+                hostname: "myserver".to_string(),
+                uptime_secs: 3600,
+            },
+            ServerActivityEvent::SystemHeartbeat {
+                summary: "CPU 12% • RAM 24% • Disk 50%".to_string(),
+            },
+            ServerActivityEvent::ThermalAlert {
+                temp_c: 88.5,
+                threshold_c: 85.0,
+            },
+            ServerActivityEvent::DiskMilestone {
+                path: "/".to_string(),
+                percent: 86.4,
+                threshold: 85.0,
+            },
+            ServerActivityEvent::GenericNote {
+                message: "system check".to_string(),
+            },
+        ];
+
+        for ev in events {
+            let record = EventRecord::new(ev.clone());
+            let json = serde_json::to_string(&record).expect("serialization failed");
+            let back: EventRecord = serde_json::from_str(&json).expect("deserialization failed");
+            assert_eq!(back.event, ev);
+        }
+    }
 }

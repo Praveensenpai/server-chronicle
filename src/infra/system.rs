@@ -32,192 +32,7 @@ pub fn read_system_metrics() -> SystemMetrics {
     }
 }
 
-fn read_cpu_temperature() -> Option<f64> {
-    // Prefer hwmon coretemp (most accurate on x86 — reads the CPU package sensor directly)
-    if let Some(t) = read_coretemp_package() {
-        return Some(t);
-    }
-
-    // Fall back to thermal_zone scanning
-    let entries = fs::read_dir("/sys/class/thermal").ok()?;
-    let mut selected: Option<(i32, f64)> = None;
-
-    for entry in entries.flatten() {
-        let name = entry.file_name().to_string_lossy().to_string();
-        if !name.starts_with("thermal_zone") {
-            continue;
-        }
-
-        let Ok(raw_value) = fs::read_to_string(entry.path().join("temp")) else {
-            continue;
-        };
-        let Ok(value) = raw_value.trim().parse::<f64>() else {
-            continue;
-        };
-        // Kernel reports millidegrees on most platforms
-        let temperature = if value.abs() > 200.0 {
-            value / 1000.0
-        } else {
-            value
-        };
-        // Skip obviously bogus readings
-        if !(0.0..=120.0).contains(&temperature) {
-            continue;
-        }
-        let sensor_type = fs::read_to_string(entry.path().join("type")).unwrap_or_default();
-        let sensor_type = sensor_type.trim().to_ascii_lowercase();
-        let score = if sensor_type.contains("package") {
-            5
-        } else if sensor_type == "x86_pkg_temp" {
-            5
-        } else if sensor_type.contains("x86") {
-            4
-        } else if sensor_type.contains("cpu") || sensor_type.contains("core") {
-            3
-        } else if sensor_type.contains("acpitz") {
-            2
-        } else {
-            1
-        };
-
-        if selected.is_none_or(|(current_score, _)| score > current_score) {
-            selected = Some((score, temperature));
-        }
-    }
-
-    selected.map(|(_, temperature)| temperature)
-}
-
-/// Read per-core temperatures from hwmon coretemp (temp2_input, temp3_input, …).
-/// temp1_input is the package sensor; temp2+ are individual cores.
-pub fn read_cpu_core_temps() -> Vec<f64> {
-    let Ok(entries) = fs::read_dir("/sys/class/hwmon") else {
-        return Vec::new();
-    };
-    for hwmon in entries.flatten() {
-        let name = fs::read_to_string(hwmon.path().join("name")).unwrap_or_default();
-        if !name.trim().eq_ignore_ascii_case("coretemp") {
-            continue;
-        }
-        let mut cores: Vec<(u32, f64)> = Vec::new();
-        let Ok(files) = fs::read_dir(hwmon.path()) else {
-            continue;
-        };
-        for f in files.flatten() {
-            let fname = f.file_name().to_string_lossy().to_string();
-            // tempN_input where N >= 2 are individual cores (N=1 is the package)
-            if let Some(rest) = fname.strip_prefix("temp") {
-                if let Some(idx_str) = rest.strip_suffix("_input") {
-                    if let Ok(idx) = idx_str.parse::<u32>() {
-                        if idx >= 2 {
-                            if let Ok(raw) = fs::read_to_string(f.path()) {
-                                if let Ok(v) = raw.trim().parse::<f64>() {
-                                    let temp = if v > 200.0 { v / 1000.0 } else { v };
-                                    if (0.0..=120.0).contains(&temp) {
-                                        cores.push((idx, temp));
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        }
-        cores.sort_by_key(|(idx, _)| *idx);
-        return cores.into_iter().map(|(_, t)| t).collect();
-    }
-    Vec::new()
-}
-
-/// Read the CPU package temperature from hwmon coretemp driver.
-/// Returns the highest temp1_input (package) from any coretemp hwmon device.
-fn read_coretemp_package() -> Option<f64> {
-    let entries = fs::read_dir("/sys/class/hwmon").ok()?;
-    for hwmon in entries.flatten() {
-        let name_path = hwmon.path().join("name");
-        let name = fs::read_to_string(&name_path).unwrap_or_default();
-        if !name.trim().eq_ignore_ascii_case("coretemp") {
-            continue;
-        }
-        // temp1_input is conventionally the package-level sensor in coretemp
-        if let Ok(raw) = fs::read_to_string(hwmon.path().join("temp1_input")) {
-            if let Ok(v) = raw.trim().parse::<f64>() {
-                let temp = if v > 200.0 { v / 1000.0 } else { v };
-                if (0.0..=120.0).contains(&temp) {
-                    return Some(temp);
-                }
-            }
-        }
-    }
-    None
-}
-
-fn read_fan_speed() -> Option<u32> {
-    // Primary: read fan RPM directly from the Embedded Controller (EC) registers.
-    // On the HP Laptop 14q-cs0xxx, the standard hwmon/hp driver exposes only
-    // pwm1_enable with no fan tachometer input — the EC holds the actual RPM at
-    // offset 0x70–0x71 as a 16-bit big-endian value.
-    if let Some(rpm) = read_fan_speed_from_ec() {
-        return Some(rpm);
-    }
-
-    // Fallback: scan hwmon fan*_input files (works on other hardware).
-    let hwmons = fs::read_dir("/sys/class/hwmon").ok()?;
-    let mut max_rpm: Option<u32> = None;
-
-    for hwmon in hwmons.flatten() {
-        let base = hwmon.path();
-        // Some kernels expose sensors under hwmonN/device/, others directly under hwmonN/
-        let search_dirs = [base.clone(), base.join("device")];
-        for dir in &search_dirs {
-            let Ok(entries) = fs::read_dir(dir) else {
-                continue;
-            };
-            for entry in entries.flatten() {
-                let fname = entry.file_name().to_string_lossy().to_string();
-                if fname.starts_with("fan") && fname.ends_with("_input") {
-                    if let Ok(raw) = fs::read_to_string(entry.path()) {
-                        if let Ok(rpm) = raw.trim().parse::<u32>() {
-                            if rpm > 0 {
-                                max_rpm = Some(max_rpm.map_or(rpm, |cur| cur.max(rpm)));
-                            }
-                        }
-                    }
-                }
-            }
-        }
-    }
-
-    max_rpm
-}
-
-/// Read fan RPM from the HP Embedded Controller register space.
-///
-/// The EC IO space is exposed at `/sys/kernel/debug/ec/ec0/io` (256 bytes) by
-/// the `ec_sys` kernel module.  On the HP 14q-cs0xxx the fan tachometer is a
-/// 16-bit big-endian value stored at offset 0x70.  A value of 0 means the fan
-/// has stopped (or the EC hasn't populated the register yet), so we return
-/// `None` in that case to avoid displaying a misleading zero.
-fn read_fan_speed_from_ec() -> Option<u32> {
-    const EC_IO_PATH: &str = "/sys/kernel/debug/ec/ec0/io";
-    const FAN_OFFSET: usize = 0x70;
-
-    let data = fs::read(EC_IO_PATH).ok()?;
-    if data.len() <= FAN_OFFSET + 1 {
-        return None;
-    }
-
-    let high = data[FAN_OFFSET] as u32;
-    let low = data[FAN_OFFSET + 1] as u32;
-    let rpm = (high << 8) | low; // big-endian u16
-
-    if rpm == 0 || rpm > 20_000 {
-        // 0 = fan stopped or register unpopulated; >20 000 is clearly bogus
-        return None;
-    }
-
-    Some(rpm)
-}
+use crate::infra::thermal::{read_cpu_core_temps, read_cpu_temperature, read_fan_speed};
 
 fn read_hostname() -> String {
     Command::new("hostname").output().map_or_else(
@@ -309,23 +124,56 @@ fn read_disk_space(mount: &str) -> (u64, u64) {
     (used, total)
 }
 
-fn read_cpu_percent() -> f64 {
-    let Ok(out) = Command::new("ps").args(["-A", "-o", "%cpu"]).output() else {
-        return 0.0;
-    };
-    let s = String::from_utf8_lossy(&out.stdout);
-    let mut total = 0.0;
-    for line in s.lines().skip(1) {
-        if let Ok(v) = line.trim().parse::<f64>() {
-            total += v;
-        }
+static LAST_CPU_JIFFIES: std::sync::Mutex<(u64, u64)> = std::sync::Mutex::new((0, 0));
+
+#[must_use]
+pub fn parse_cpu_stat_line(line: &str) -> Option<(u64, u64)> {
+    if !line.starts_with("cpu ") {
+        return None;
     }
-    let cpus = num_cpus();
-    (total / cpus as f64).min(100.0)
+    let parts: Vec<u64> = line
+        .split_whitespace()
+        .skip(1)
+        .filter_map(|p| p.parse::<u64>().ok())
+        .collect();
+
+    if parts.len() < 4 {
+        return None;
+    }
+
+    let idle = parts[3] + parts.get(4).copied().unwrap_or(0);
+    let total: u64 = parts.iter().sum();
+    let work = total.saturating_sub(idle);
+    Some((work, total))
 }
 
-fn num_cpus() -> usize {
-    std::thread::available_parallelism().map_or(1, |n| n.get())
+fn read_cpu_percent() -> f64 {
+    let Ok(content) = fs::read_to_string("/proc/stat") else {
+        return 0.0;
+    };
+    let Some(first_line) = content.lines().next() else {
+        return 0.0;
+    };
+    let Some((work, total)) = parse_cpu_stat_line(first_line) else {
+        return 0.0;
+    };
+
+    let mut lock = match LAST_CPU_JIFFIES.lock() {
+        Ok(guard) => guard,
+        Err(poisoned) => poisoned.into_inner(),
+    };
+
+    let (prev_work, prev_total) = *lock;
+    *lock = (work, total);
+
+    if prev_total == 0 || total <= prev_total {
+        return 0.0;
+    }
+
+    let delta_total = total - prev_total;
+    let delta_work = work.saturating_sub(prev_work);
+
+    ((delta_work as f64 / delta_total as f64) * 100.0).clamp(0.0, 100.0)
 }
 
 pub fn read_top_processes(limit: usize) -> Vec<ProcessItem> {
@@ -355,4 +203,30 @@ pub fn read_top_processes(limit: usize) -> Vec<ProcessItem> {
         }
     }
     items
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_parse_mem_line() {
+        let line = "MemTotal:       16307136 kB";
+        assert_eq!(parse_mem_line(line), 16307136);
+
+        let bogus = "InvalidLine";
+        assert_eq!(parse_mem_line(bogus), 0);
+    }
+
+    #[test]
+    fn test_parse_cpu_stat_line() {
+        let line = "cpu  53508 0 6772 97024 572 0 265 0 0 0";
+        let (work, total) = parse_cpu_stat_line(line).expect("must parse valid cpu line");
+        assert_eq!(total, 53508 + 6772 + 97024 + 572 + 265);
+        let idle = 97024 + 572;
+        assert_eq!(work, total - idle);
+
+        let invalid = "cpu0 100 200";
+        assert!(parse_cpu_stat_line(invalid).is_none());
+    }
 }

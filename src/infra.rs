@@ -3,6 +3,7 @@ pub mod docker;
 pub mod ssh;
 pub mod storage;
 pub mod system;
+pub mod thermal;
 pub mod torrent;
 
 use crate::domain::models::ServerSnapshot;

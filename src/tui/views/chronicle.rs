@@ -7,7 +7,8 @@ use ratatui::{
 
 use crate::domain::models::{EventRecord, ServerActivityEvent};
 use crate::tui::theme::{
-    COLOR_DANGER, COLOR_MUTED, COLOR_PRIMARY, COLOR_SECONDARY, COLOR_SUCCESS, COLOR_WARNING,
+    COLOR_BORDER, COLOR_DANGER, COLOR_MUTED, COLOR_PRIMARY, COLOR_SECONDARY, COLOR_SUCCESS,
+    COLOR_WARNING,
 };
 
 pub fn render_chronicle(
@@ -31,7 +32,7 @@ fn render_search_bar(frame: &mut Frame, area: Rect, query: &str, is_searching: b
     let border_style = if is_searching {
         Style::default().fg(COLOR_PRIMARY)
     } else {
-        Style::default().fg(COLOR_MUTED)
+        Style::default().fg(COLOR_BORDER)
     };
 
     let title = if is_searching {
@@ -68,21 +69,26 @@ fn render_events_list(
             if query.is_empty() {
                 return true;
             }
-            let desc = format_event_text(&e.event);
+            let desc = e.event.summary();
             desc.to_lowercase().contains(&query.to_lowercase())
         })
         .collect();
 
     let visible_count = area.height.saturating_sub(2) as usize;
+    let max_scroll = filtered
+        .len()
+        .saturating_sub(visible_count.min(filtered.len()));
+    let clamped_scroll = scroll.min(max_scroll);
+
     let items: Vec<ListItem> = filtered
         .iter()
         .rev()
-        .skip(scroll)
+        .skip(clamped_scroll)
         .take(visible_count)
         .map(|e| {
             let time = e.timestamp.format("%H:%M:%S").to_string();
             let (badge, badge_color) = get_event_badge(&e.event);
-            let desc = format_event_text(&e.event);
+            let desc = e.event.summary();
 
             let line = ratatui::text::Line::from(vec![
                 ratatui::text::Span::styled(
@@ -101,88 +107,35 @@ fn render_events_list(
         })
         .collect();
 
-    let list = List::new(items).block(Block::default().borders(Borders::ALL).title(format!(
-        " 📜 Daily Timeline ({}/{}) ",
-        filtered.len(),
-        events.len()
-    )));
+    let list = List::new(items).block(
+        Block::default()
+            .borders(Borders::ALL)
+            .border_style(Style::default().fg(COLOR_BORDER))
+            .title(format!(
+                " 📜 Daily Timeline ({}/{}) ",
+                filtered.len(),
+                events.len()
+            )),
+    );
 
     frame.render_widget(list, area);
 }
 
 fn get_event_badge(e: &ServerActivityEvent) -> (&'static str, ratatui::style::Color) {
     match e {
+        ServerActivityEvent::SystemStartup { .. } => ("[🚀 STARTUP]", COLOR_PRIMARY),
+        ServerActivityEvent::SystemHeartbeat { .. } => ("[💓 HEALTH]", COLOR_SECONDARY),
         ServerActivityEvent::BatteryStateChanged { .. } => ("[⚡ POWER]", COLOR_PRIMARY),
         ServerActivityEvent::BatteryBracketCompleted { .. } => ("[⏱ BRACKET]", COLOR_SUCCESS),
         ServerActivityEvent::PowerOutageAlert { .. } => ("[🚨 OUTAGE]", COLOR_DANGER),
         ServerActivityEvent::PowerRestoredAlert { .. } => ("[✨ RESTORED]", COLOR_SUCCESS),
+        ServerActivityEvent::ThermalAlert { .. } => ("[🌡️ THERMAL]", COLOR_DANGER),
+        ServerActivityEvent::DiskMilestone { .. } => ("[💾 DISK]", COLOR_WARNING),
         ServerActivityEvent::SshLogin { .. } => ("[👤 LOGIN]", COLOR_PRIMARY),
         ServerActivityEvent::SshLogout { .. } => ("[👤 LOGOUT]", COLOR_MUTED),
         ServerActivityEvent::ContainerStateChanged { .. } => ("[🐳 DOCKER]", COLOR_SECONDARY),
         ServerActivityEvent::TorrentCompleted { .. } => ("[📥 TORRENT]", COLOR_SUCCESS),
         ServerActivityEvent::ResourceSpike { .. } => ("[⚠️ SPIKE]", COLOR_WARNING),
         ServerActivityEvent::GenericNote { .. } => ("[ℹ️ NOTE]", COLOR_MUTED),
-    }
-}
-
-fn format_event_text(e: &ServerActivityEvent) -> String {
-    match e {
-        ServerActivityEvent::BatteryStateChanged {
-            from_status,
-            to_status,
-            capacity,
-        } => {
-            format!("{from_status} ➔ {to_status} ({capacity}%)")
-        }
-        ServerActivityEvent::BatteryBracketCompleted {
-            bracket,
-            duration_secs,
-            rate_pct_per_hour,
-        } => {
-            format!(
-                "{bracket} in {}m {}s ({rate_pct_per_hour:.1}%/hr)",
-                duration_secs / 60,
-                duration_secs % 60
-            )
-        }
-        ServerActivityEvent::PowerOutageAlert {
-            capacity,
-            estimated_runtime_mins,
-        } => {
-            format!("AC Lost! Battery at {capacity}%, ~{estimated_runtime_mins}m left")
-        }
-        ServerActivityEvent::PowerRestoredAlert { capacity } => {
-            format!("AC Power Restored! Capacity: {capacity}%")
-        }
-        ServerActivityEvent::SshLogin { user, client_ip } => {
-            format!("SSH login from {user}@{client_ip}")
-        }
-        ServerActivityEvent::SshLogout {
-            user,
-            client_ip,
-            duration_secs,
-        } => {
-            format!(
-                "SSH closed: {user}@{client_ip} (active {}m)",
-                duration_secs / 60
-            )
-        }
-        ServerActivityEvent::ContainerStateChanged { name, status } => {
-            format!("Container {name}: {status}")
-        }
-        ServerActivityEvent::TorrentCompleted { name, size_bytes } => {
-            format!(
-                "Downloaded {name} ({:.1} GB)",
-                *size_bytes as f64 / 1_000_000_000.0
-            )
-        }
-        ServerActivityEvent::ResourceSpike {
-            metric,
-            value,
-            threshold,
-        } => {
-            format!("{metric} spike: {value:.1}% > {threshold:.1}%")
-        }
-        ServerActivityEvent::GenericNote { message } => message.clone(),
     }
 }

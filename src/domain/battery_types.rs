@@ -58,11 +58,13 @@ pub struct BatterySnapshot {
     pub charge_full_uah: u64,
     pub charge_full_design_uah: u64,
     pub voltage_now_uv: u64,
+    pub power_now_uw: Option<u64>,
     pub health_percent: f64,
     pub calculated_rate_pct_hr: f64,
     pub mins_per_percent: f64,
     pub estimated_minutes_left: Option<u64>,
     pub brackets: Vec<BracketStat>,
+    pub discharge_brackets: Vec<BracketStat>,
 }
 
 impl Default for BatterySnapshot {
@@ -75,11 +77,13 @@ impl Default for BatterySnapshot {
             charge_full_uah: 0,
             charge_full_design_uah: 0,
             voltage_now_uv: 0,
+            power_now_uw: None,
             health_percent: 100.0,
             calculated_rate_pct_hr: 0.0,
             mins_per_percent: 0.0,
             estimated_minutes_left: None,
             brackets: init_default_brackets(),
+            discharge_brackets: init_default_discharge_brackets(),
         }
     }
 }
@@ -92,6 +96,22 @@ pub fn init_default_brackets() -> Vec<BracketStat> {
         let high = (i + 1) * 10;
         out.push(BracketStat {
             label: format!("{low}% - {high}%"),
+            duration_secs: 0,
+            rate_pct_per_hour: 0.0,
+            completed: false,
+        });
+    }
+    out
+}
+
+#[must_use]
+pub fn init_default_discharge_brackets() -> Vec<BracketStat> {
+    let mut out = Vec::with_capacity(10);
+    for i in (0..10).rev() {
+        let high = (i + 1) * 10;
+        let low = i * 10;
+        out.push(BracketStat {
+            label: format!("{high}% - {low}%"),
             duration_secs: 0,
             rate_pct_per_hour: 0.0,
             completed: false,
@@ -126,6 +146,9 @@ mod tests {
         // Charged 10% in 1800 seconds (30 mins) -> 20% per hour
         let rate = calculate_rate_pct_per_hour(10, 20, 1800);
         assert!((rate - 20.0).abs() < 0.01);
+
+        // Zero duration returns 0.0
+        assert_eq!(calculate_rate_pct_per_hour(10, 20, 0), 0.0);
     }
 
     #[test]
@@ -135,6 +158,9 @@ mod tests {
 
         let degraded = calculate_health_percent(1800000, 3600000);
         assert!((degraded - 50.0).abs() < 0.01);
+
+        // Zero design capacity returns 100.0
+        assert_eq!(calculate_health_percent(1800000, 0), 100.0);
     }
 
     #[test]
@@ -142,5 +168,23 @@ mod tests {
         assert_eq!(PowerState::from_str("Charging"), PowerState::Charging);
         assert_eq!(PowerState::from_str("Discharging"), PowerState::Discharging);
         assert_eq!(PowerState::from_str("Full"), PowerState::Full);
+        assert_eq!(
+            PowerState::from_str("Not Charging"),
+            PowerState::NotCharging
+        );
+        assert_eq!(PowerState::from_str("anything_else"), PowerState::Unknown);
+    }
+
+    #[test]
+    fn test_init_brackets() {
+        let charge_b = init_default_brackets();
+        assert_eq!(charge_b.len(), 10);
+        assert_eq!(charge_b[0].label, "0% - 10%");
+        assert_eq!(charge_b[9].label, "90% - 100%");
+
+        let discharge_b = init_default_discharge_brackets();
+        assert_eq!(discharge_b.len(), 10);
+        assert_eq!(discharge_b[0].label, "100% - 90%");
+        assert_eq!(discharge_b[9].label, "10% - 0%");
     }
 }

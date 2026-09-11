@@ -1,5 +1,6 @@
 pub mod battery_view;
 pub mod chronicle;
+pub mod services;
 pub mod telemetry;
 
 use ratatui::{
@@ -22,9 +23,13 @@ pub fn render_compact_gauge(
     percent: u16,
     label: String,
 ) {
+    use crate::tui::theme::COLOR_BORDER;
     use ratatui::{text::Line, widgets::Paragraph};
 
-    let block = Block::default().borders(Borders::ALL).title(title);
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(COLOR_BORDER))
+        .title(title);
     let inner = block.inner(area);
     frame.render_widget(block, area);
 
@@ -55,4 +60,83 @@ pub fn render_compact_gauge(
         )));
         frame.render_widget(p, text_area);
     }
+}
+
+pub fn render_kill_modal(frame: &mut Frame, area: Rect, app: &crate::tui::app::App) {
+    use crate::tui::theme::{COLOR_BORDER, COLOR_DANGER, COLOR_MUTED, COLOR_WARNING};
+    use ratatui::{
+        layout::Alignment,
+        text::Line,
+        widgets::{Clear, Paragraph},
+    };
+
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(COLOR_BORDER))
+        .title(" ⚠️ Terminate Process Confirmation ");
+
+    let proc_name = app
+        .snapshot
+        .top_processes
+        .get(app.selected_proc_idx)
+        .map_or("Unknown", |p| p.name.as_str());
+    let pid = app
+        .snapshot
+        .top_processes
+        .get(app.selected_proc_idx)
+        .map_or(0, |p| p.pid);
+
+    let modal_area = centered_rect(50, 20, area);
+    frame.render_widget(Clear, modal_area);
+
+    let text = vec![
+        Line::from(""),
+        Line::from(vec![
+            Span::raw("Terminate "),
+            Span::styled(
+                format!("{proc_name} (PID {pid})"),
+                Style::default()
+                    .fg(COLOR_WARNING)
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::raw(" with SIGTERM?"),
+        ]),
+        Line::from(""),
+        Line::from(vec![
+            Span::styled(
+                " [y] Confirm ",
+                Style::default()
+                    .fg(COLOR_DANGER)
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::styled(" [n / Esc] Cancel ", Style::default().fg(COLOR_MUTED)),
+        ]),
+    ];
+
+    let p = Paragraph::new(text)
+        .alignment(Alignment::Center)
+        .block(block);
+    frame.render_widget(p, modal_area);
+}
+
+pub fn centered_rect(percent_x: u16, percent_y: u16, r: Rect) -> Rect {
+    use ratatui::layout::{Constraint, Direction, Layout};
+
+    let popup_layout = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Percentage((100 - percent_y) / 2),
+            Constraint::Percentage(percent_y),
+            Constraint::Percentage((100 - percent_y) / 2),
+        ])
+        .split(r);
+
+    Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints([
+            Constraint::Percentage((100 - percent_x) / 2),
+            Constraint::Percentage(percent_x),
+            Constraint::Percentage((100 - percent_x) / 2),
+        ])
+        .split(popup_layout[1])[1]
 }

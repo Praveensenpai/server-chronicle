@@ -85,9 +85,19 @@ fn print_battery_summary() {
         b.charge_full_uah / 1000,
         b.charge_full_design_uah / 1000
     );
+
+    if let Some(uw) = b.power_now_uw {
+        println!("  • Instant Power:    {:.2} W", uw as f64 / 1_000_000.0);
+    }
+
     if b.calculated_rate_pct_hr > 0.01 {
+        let sign = if b.state == domain::battery_types::PowerState::Discharging {
+            "-"
+        } else {
+            "+"
+        };
         println!(
-            "  • Calculated Rate:  +{:.2}% / hr (~{:.1}m per 1%)",
+            "  • Calculated Rate:  {sign}{:.2}% / hr (~{:.1}m per 1%)",
             b.calculated_rate_pct_hr, b.mins_per_percent
         );
     } else {
@@ -101,8 +111,18 @@ fn print_battery_summary() {
         };
         println!("  • Estimated {label}: {left} minutes");
     }
-    println!("\n  📈 Charging Brackets Breakdown:");
-    for br in &b.brackets {
+
+    print_bracket_table("📈 Charging Brackets Breakdown", &b.brackets);
+    print_bracket_table(
+        "📉 Discharging / Drain Brackets Breakdown",
+        &b.discharge_brackets,
+    );
+    println!("🌸 ========================================= 🌸");
+}
+
+fn print_bracket_table(title: &str, brackets: &[domain::battery_types::BracketStat]) {
+    println!("\n  {title}:");
+    for br in brackets {
         let status = if br.completed {
             "✔ Done"
         } else if br.duration_secs > 0 {
@@ -124,5 +144,4 @@ fn print_battery_summary() {
             status
         );
     }
-    println!("🌸 ========================================= 🌸");
 }

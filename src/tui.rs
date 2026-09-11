@@ -10,10 +10,10 @@ use crossterm::{
 };
 use ratatui::{
     backend::CrosstermBackend,
-    layout::{Alignment, Constraint, Direction, Layout, Rect},
+    layout::{Constraint, Direction, Layout, Rect},
     style::{Modifier, Style},
     text::{Line, Span},
-    widgets::{Block, Borders, Clear, Paragraph, Tabs},
+    widgets::{Block, Borders, Paragraph, Tabs},
     Frame, Terminal,
 };
 use std::io::stdout;
@@ -21,7 +21,8 @@ use std::time::{Duration, Instant};
 
 use app::{ActiveTab, App};
 use theme::{
-    COLOR_DANGER, COLOR_MUTED, COLOR_PRIMARY, COLOR_SECONDARY, COLOR_SUCCESS, COLOR_WARNING,
+    COLOR_BORDER, COLOR_DANGER, COLOR_MUTED, COLOR_PRIMARY, COLOR_SECONDARY, COLOR_SUCCESS,
+    COLOR_WARNING,
 };
 
 pub fn run_tui() -> Result<()> {
@@ -76,9 +77,11 @@ fn handle_key(app: &mut App, code: KeyCode) -> bool {
             KeyCode::Esc | KeyCode::Enter => app.is_searching = false,
             KeyCode::Backspace => {
                 app.search_query.pop();
+                app.scroll_offset = 0;
             }
             KeyCode::Char(c) => {
                 app.search_query.push(c);
+                app.scroll_offset = 0;
             }
             _ => {}
         }
@@ -103,6 +106,18 @@ fn handle_key(app: &mut App, code: KeyCode) -> bool {
     match code {
         KeyCode::Char('q') | KeyCode::Esc => return true,
         KeyCode::Tab => app.cycle_tab(),
+        KeyCode::Char('1') => {
+            app.active_tab = ActiveTab::Telemetry;
+            app.scroll_offset = 0;
+        }
+        KeyCode::Char('2') => {
+            app.active_tab = ActiveTab::Battery;
+            app.scroll_offset = 0;
+        }
+        KeyCode::Char('3') => {
+            app.active_tab = ActiveTab::Chronicle;
+            app.scroll_offset = 0;
+        }
         KeyCode::Char('e') => app.export_ai_prompt(),
         KeyCode::Char('/') => {
             if app.active_tab == ActiveTab::Chronicle {
@@ -174,37 +189,44 @@ fn ui(frame: &mut Frame, app: &App) {
     render_footer(frame, chunks[2], app);
 
     if app.show_kill_modal {
-        render_kill_modal(frame, size, app);
+        views::render_kill_modal(frame, size, app);
     }
 }
 
 fn render_header(frame: &mut Frame, area: Rect, app: &App) {
+    let has_room = area.width >= 90;
+    let constraints = if has_room {
+        vec![
+            Constraint::Length(22),
+            Constraint::Min(38),
+            Constraint::Length(26),
+        ]
+    } else {
+        vec![Constraint::Length(22), Constraint::Min(20)]
+    };
+
     let cols = Layout::default()
         .direction(Direction::Horizontal)
-        .constraints([Constraint::Length(26), Constraint::Min(20)])
+        .constraints(constraints)
         .split(area);
 
-    let title_line = Line::from(vec![
-        Span::styled(
-            " ⏱️ SERVER ",
-            Style::default()
-                .fg(COLOR_PRIMARY)
-                .add_modifier(Modifier::BOLD),
-        ),
-        Span::styled(
-            "CHRONICLE ",
-            Style::default()
-                .fg(COLOR_SECONDARY)
-                .add_modifier(Modifier::BOLD),
-        ),
-    ]);
-    let title_block = Paragraph::new(title_line).block(Block::default().borders(Borders::ALL));
+    let title_line = Line::from(vec![Span::styled(
+        " ⏱ CHRONICLE ",
+        Style::default()
+            .fg(COLOR_PRIMARY)
+            .add_modifier(Modifier::BOLD),
+    )]);
+    let title_block = Paragraph::new(title_line).block(
+        Block::default()
+            .borders(Borders::ALL)
+            .border_style(Style::default().fg(COLOR_BORDER)),
+    );
     frame.render_widget(title_block, cols[0]);
 
     let tab_titles = vec![
-        " [Tab] 🖥️ Telemetry ",
-        " [Tab] 🔋 Battery UPS ",
-        " [Tab] 📜 Chronicle ",
+        " [1] 🖥️ Telemetry ",
+        " [2] 🔋 Battery UPS ",
+        " [3] 📜 Chronicle ",
     ];
     let selected_idx = match app.active_tab {
         ActiveTab::Telemetry => 0,
@@ -214,7 +236,11 @@ fn render_header(frame: &mut Frame, area: Rect, app: &App) {
 
     let tabs = Tabs::new(tab_titles)
         .select(selected_idx)
-        .block(Block::default().borders(Borders::ALL))
+        .block(
+            Block::default()
+                .borders(Borders::ALL)
+                .border_style(Style::default().fg(COLOR_BORDER)),
+        )
         .style(Style::default().fg(COLOR_MUTED))
         .highlight_style(
             Style::default()
@@ -222,6 +248,30 @@ fn render_header(frame: &mut Frame, area: Rect, app: &App) {
                 .add_modifier(Modifier::BOLD),
         );
     frame.render_widget(tabs, cols[1]);
+
+    if has_room && cols.len() > 2 {
+        let uptime_h = app.snapshot.system.uptime_secs / 3600;
+        let uptime_d = uptime_h / 24;
+        let host_line = Line::from(vec![
+            Span::styled("🌐 ", Style::default().fg(COLOR_PRIMARY)),
+            Span::styled(
+                &app.snapshot.system.hostname,
+                Style::default()
+                    .fg(COLOR_SECONDARY)
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::styled(
+                format!(" • ⬆️ {}d {}h", uptime_d, uptime_h % 24),
+                Style::default().fg(COLOR_MUTED),
+            ),
+        ]);
+        let host_p = Paragraph::new(host_line).block(
+            Block::default()
+                .borders(Borders::ALL)
+                .border_style(Style::default().fg(COLOR_BORDER)),
+        );
+        frame.render_widget(host_p, cols[2]);
+    }
 }
 
 fn render_footer(frame: &mut Frame, area: Rect, app: &App) {
@@ -237,111 +287,41 @@ fn render_footer(frame: &mut Frame, area: Rect, app: &App) {
 
     let keys = vec![
         Span::styled(
-            " Tab",
+            " [Tab/1-3]",
             Style::default()
                 .fg(COLOR_PRIMARY)
                 .add_modifier(Modifier::BOLD),
         ),
-        Span::raw(" Cycle Views • "),
+        Span::styled(" Views ", Style::default().fg(COLOR_MUTED)),
         Span::styled(
-            "e",
+            "[e]",
             Style::default()
                 .fg(COLOR_SECONDARY)
                 .add_modifier(Modifier::BOLD),
         ),
-        Span::raw(" AI Export • "),
+        Span::styled(" AI Export ", Style::default().fg(COLOR_MUTED)),
         Span::styled(
-            "K",
+            "[K]",
             Style::default()
                 .fg(COLOR_DANGER)
                 .add_modifier(Modifier::BOLD),
         ),
-        Span::raw(" Kill Proc • "),
+        Span::styled(" Kill Proc ", Style::default().fg(COLOR_MUTED)),
         Span::styled(
-            "/",
+            "[/]",
             Style::default()
                 .fg(COLOR_WARNING)
                 .add_modifier(Modifier::BOLD),
         ),
-        Span::raw(" Filter • "),
+        Span::styled(" Filter ", Style::default().fg(COLOR_MUTED)),
         Span::styled(
-            "q",
+            "[q]",
             Style::default()
                 .fg(COLOR_MUTED)
                 .add_modifier(Modifier::BOLD),
         ),
-        Span::raw(" Exit"),
+        Span::styled(" Exit", Style::default().fg(COLOR_MUTED)),
     ];
     let p = Paragraph::new(Line::from(keys));
     frame.render_widget(p, area);
-}
-
-fn render_kill_modal(frame: &mut Frame, area: Rect, app: &App) {
-    let block = Block::default()
-        .borders(Borders::ALL)
-        .border_style(Style::default().fg(COLOR_DANGER))
-        .title(" ⚠️ Terminate Process Confirmation ");
-
-    let proc_name = app
-        .snapshot
-        .top_processes
-        .get(app.selected_proc_idx)
-        .map_or("Unknown", |p| p.name.as_str());
-    let pid = app
-        .snapshot
-        .top_processes
-        .get(app.selected_proc_idx)
-        .map_or(0, |p| p.pid);
-
-    let modal_area = centered_rect(50, 20, area);
-    frame.render_widget(Clear, modal_area);
-
-    let text = vec![
-        Line::from(""),
-        Line::from(vec![
-            Span::raw("Terminate "),
-            Span::styled(
-                format!("{proc_name} (PID {pid})"),
-                Style::default()
-                    .fg(COLOR_WARNING)
-                    .add_modifier(Modifier::BOLD),
-            ),
-            Span::raw(" with SIGTERM?"),
-        ]),
-        Line::from(""),
-        Line::from(vec![
-            Span::styled(
-                " [y] Confirm ",
-                Style::default()
-                    .fg(COLOR_DANGER)
-                    .add_modifier(Modifier::BOLD),
-            ),
-            Span::styled(" [n / Esc] Cancel ", Style::default().fg(COLOR_MUTED)),
-        ]),
-    ];
-
-    let p = Paragraph::new(text)
-        .alignment(Alignment::Center)
-        .block(block);
-    frame.render_widget(p, modal_area);
-}
-
-fn centered_rect(percent_x: u16, percent_y: u16, r: Rect) -> Rect {
-    let popup_layout = Layout::default()
-        .direction(Direction::Vertical)
-        .constraints([
-            Constraint::Percentage((100 - percent_y) / 2),
-            Constraint::Percentage(percent_y),
-            Constraint::Percentage((100 - percent_y) / 2),
-        ])
-        .split(r);
-
-    Layout::default()
-        .direction(Direction::Horizontal)
-        .constraints([
-            Constraint::Percentage((100 - percent_x) / 2),
-            Constraint::Percentage(percent_x),
-            Constraint::Percentage((100 - percent_x) / 2),
-        ])
-        .split(popup_layout[1])[1]
 }
