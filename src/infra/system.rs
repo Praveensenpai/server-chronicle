@@ -176,6 +176,11 @@ fn read_cpu_percent() -> f64 {
     ((delta_work as f64 / delta_total as f64) * 100.0).clamp(0.0, 100.0)
 }
 
+pub fn normalize_process_cpu(raw_cpu: f64, num_cpus: usize) -> f64 {
+    let divisor = num_cpus.max(1) as f64;
+    (raw_cpu / divisor).clamp(0.0, 100.0)
+}
+
 pub fn read_top_processes(limit: usize) -> Vec<ProcessItem> {
     let Ok(out) = Command::new("ps")
         .args(["-eo", "pid,comm,%cpu,%mem", "--sort=-%cpu"])
@@ -186,13 +191,15 @@ pub fn read_top_processes(limit: usize) -> Vec<ProcessItem> {
 
     let s = String::from_utf8_lossy(&out.stdout);
     let mut items = Vec::new();
+    let num_cpus = std::thread::available_parallelism().map_or(1, |n| n.get());
 
     for line in s.lines().skip(1).take(limit) {
         let parts: Vec<&str> = line.split_whitespace().collect();
         if parts.len() >= 4 {
             let pid = parts[0].parse::<u32>().unwrap_or(0);
             let name = parts[1].to_string();
-            let cpu_percent = parts[2].parse::<f64>().unwrap_or(0.0);
+            let raw_cpu = parts[2].parse::<f64>().unwrap_or(0.0);
+            let cpu_percent = normalize_process_cpu(raw_cpu, num_cpus);
             let mem_percent = parts[3].parse::<f64>().unwrap_or(0.0);
             items.push(ProcessItem {
                 pid,
@@ -228,5 +235,16 @@ mod tests {
 
         let invalid = "cpu0 100 200";
         assert!(parse_cpu_stat_line(invalid).is_none());
+    }
+
+    #[test]
+    fn test_normalize_process_cpu() {
+        // 150% raw on 4 cores = 37.5% total host CPU
+        assert!((normalize_process_cpu(150.0, 4) - 37.5).abs() < 0.01);
+        // 100% raw on 4 cores = 25.0%
+        assert!((normalize_process_cpu(100.0, 4) - 25.0).abs() < 0.01);
+        // Edge cases
+        assert_eq!(normalize_process_cpu(500.0, 4), 100.0);
+        assert_eq!(normalize_process_cpu(50.0, 0), 50.0);
     }
 }
