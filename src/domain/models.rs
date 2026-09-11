@@ -94,6 +94,7 @@ pub struct TorrentSnapshot {
 pub struct SystemMetrics {
     pub cpu_percent: f64,
     pub cpu_temp_c: Option<f64>,
+    pub cpu_core_temps_c: Vec<f64>,
     pub fan_speed_rpm: Option<u32>,
     pub mem_used_bytes: u64,
     pub mem_total_bytes: u64,

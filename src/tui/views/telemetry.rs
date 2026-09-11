@@ -23,7 +23,7 @@ pub fn render_telemetry(
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
-            Constraint::Length(7),  // Gauges
+            Constraint::Length(8),  // Gauges
             Constraint::Length(10), // Containers & SSH
             Constraint::Min(8),     // Top Processes
         ])
@@ -130,6 +130,7 @@ fn render_cpu_gauge(frame: &mut Frame, area: Rect, sys: &crate::domain::models::
         return;
     }
 
+    // Row 0: usage gauge
     let gauge_area = Rect::new(inner.x, inner.y, inner.width, 1);
     let gauge = Gauge::default()
         .gauge_style(Style::default().fg(color))
@@ -143,18 +144,62 @@ fn render_cpu_gauge(frame: &mut Frame, area: Rect, sys: &crate::domain::models::
         ));
     frame.render_widget(gauge, gauge_area);
 
-    let temperature = sys
+    // Row 1: blank spacer (the block border takes row 0 of inner, gauge is row 1)
+    // Rows 2+: temperature and fan details
+    let temp_color = sys.cpu_temp_c.map_or(COLOR_MUTED, |t| {
+        if t >= 90.0 {
+            COLOR_DANGER
+        } else if t >= 70.0 {
+            COLOR_WARNING
+        } else {
+            COLOR_SUCCESS
+        }
+    });
+
+    let temp_str = sys
         .cpu_temp_c
-        .map_or_else(|| "--".to_string(), |value| format!("{value:.1}°C"));
-    let fan_speed = sys
+        .map_or_else(|| "N/A".to_string(), |t| format!("{t:.1}°C"));
+
+    let fan_str = sys
         .fan_speed_rpm
-        .map_or_else(|| "--".to_string(), |value| format!("{value} RPM"));
-    let details = Paragraph::new(vec![
-        Line::from(format!("🌡 Temp: {temperature}")),
-        Line::from(format!("🌀 Fan:  {fan_speed}")),
-    ])
-    .style(Style::default().fg(COLOR_MUTED));
-    let details_area = Rect::new(inner.x, inner.y.saturating_add(2), inner.width, 2);
+        .map_or_else(|| "N/A".to_string(), |r| format!("{r} RPM"));
+
+    // Build core temps string (e.g. "42° 44° 41° 43°")
+    let cores_str = if sys.cpu_core_temps_c.is_empty() {
+        String::new()
+    } else {
+        sys.cpu_core_temps_c
+            .iter()
+            .map(|t| format!("{t:.0}°"))
+            .collect::<Vec<_>>()
+            .join(" ")
+    };
+
+    let mut lines: Vec<Line> = vec![
+        Line::from(vec![
+            Span::styled("🌡 Temp: ", Style::default().fg(COLOR_MUTED)),
+            Span::styled(temp_str, Style::default().fg(temp_color).add_modifier(Modifier::BOLD)),
+        ]),
+        Line::from(vec![
+            Span::styled("🌀 Fan:  ", Style::default().fg(COLOR_MUTED)),
+            Span::styled(fan_str, Style::default().fg(COLOR_MUTED)),
+        ]),
+    ];
+
+    if !cores_str.is_empty() {
+        lines.push(Line::from(vec![
+            Span::styled("   Core: ", Style::default().fg(COLOR_MUTED)),
+            Span::styled(cores_str, Style::default().fg(COLOR_MUTED)),
+        ]));
+    }
+
+    let details_area = Rect::new(
+        inner.x,
+        inner.y.saturating_add(2),
+        inner.width,
+        lines.len() as u16,
+    );
+    let details = Paragraph::new(lines);
     frame.render_widget(details, details_area);
 }
 

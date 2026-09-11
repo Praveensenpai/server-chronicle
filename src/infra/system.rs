@@ -12,11 +12,13 @@ pub fn read_system_metrics() -> SystemMetrics {
     let (disk_used_bytes, disk_total_bytes) = read_disk_space("/");
     let cpu_percent = read_cpu_percent();
     let cpu_temp_c = read_cpu_temperature();
+    let cpu_core_temps_c = read_cpu_core_temps();
     let fan_speed_rpm = read_fan_speed();
 
     SystemMetrics {
         cpu_percent,
         cpu_temp_c,
+        cpu_core_temps_c,
         fan_speed_rpm,
         mem_used_bytes,
         mem_total_bytes,
@@ -31,6 +33,12 @@ pub fn read_system_metrics() -> SystemMetrics {
 }
 
 fn read_cpu_temperature() -> Option<f64> {
+    // Prefer hwmon coretemp (most accurate on x86 — reads the CPU package sensor directly)
+    if let Some(t) = read_coretemp_package() {
+        return Some(t);
+    }
+
+    // Fall back to thermal_zone scanning
     let entries = fs::read_dir("/sys/class/thermal").ok()?;
     let mut selected: Option<(i32, f64)> = None;
 
@@ -46,18 +54,27 @@ fn read_cpu_temperature() -> Option<f64> {
         let Ok(value) = raw_value.trim().parse::<f64>() else {
             continue;
         };
+        // Kernel reports millidegrees on most platforms
         let temperature = if value.abs() > 200.0 {
             value / 1000.0
         } else {
             value
         };
+        // Skip obviously bogus readings
+        if !(0.0..=120.0).contains(&temperature) {
+            continue;
+        }
         let sensor_type = fs::read_to_string(entry.path().join("type")).unwrap_or_default();
-        let sensor_type = sensor_type.to_ascii_lowercase();
+        let sensor_type = sensor_type.trim().to_ascii_lowercase();
         let score = if sensor_type.contains("package") {
+            5
+        } else if sensor_type == "x86_pkg_temp" {
+            5
+        } else if sensor_type.contains("x86") {
             4
         } else if sensor_type.contains("cpu") || sensor_type.contains("core") {
             3
-        } else if sensor_type.contains("x86") {
+        } else if sensor_type.contains("acpitz") {
             2
         } else {
             1
@@ -71,24 +88,97 @@ fn read_cpu_temperature() -> Option<f64> {
     selected.map(|(_, temperature)| temperature)
 }
 
-fn read_fan_speed() -> Option<u32> {
-    let entries = fs::read_dir("/sys/class/hwmon").ok()?;
-    entries
-        .flatten()
-        .flat_map(|entry| fs::read_dir(entry.path()).into_iter().flatten())
-        .filter_map(Result::ok)
-        .filter_map(|entry| {
-            let name = entry.file_name().to_string_lossy().to_string();
-            if !name.starts_with("fan") || !name.ends_with("_input") {
-                return None;
+/// Read per-core temperatures from hwmon coretemp (temp2_input, temp3_input, …).
+/// temp1_input is the package sensor; temp2+ are individual cores.
+pub fn read_cpu_core_temps() -> Vec<f64> {
+    let Ok(entries) = fs::read_dir("/sys/class/hwmon") else {
+        return Vec::new();
+    };
+    for hwmon in entries.flatten() {
+        let name = fs::read_to_string(hwmon.path().join("name")).unwrap_or_default();
+        if !name.trim().eq_ignore_ascii_case("coretemp") {
+            continue;
+        }
+        let mut cores: Vec<(u32, f64)> = Vec::new();
+        let Ok(files) = fs::read_dir(hwmon.path()) else {
+            continue;
+        };
+        for f in files.flatten() {
+            let fname = f.file_name().to_string_lossy().to_string();
+            // tempN_input where N >= 2 are individual cores (N=1 is the package)
+            if let Some(rest) = fname.strip_prefix("temp") {
+                if let Some(idx_str) = rest.strip_suffix("_input") {
+                    if let Ok(idx) = idx_str.parse::<u32>() {
+                        if idx >= 2 {
+                            if let Ok(raw) = fs::read_to_string(f.path()) {
+                                if let Ok(v) = raw.trim().parse::<f64>() {
+                                    let temp = if v > 200.0 { v / 1000.0 } else { v };
+                                    if (0.0..=120.0).contains(&temp) {
+                                        cores.push((idx, temp));
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
             }
-            fs::read_to_string(entry.path())
-                .ok()?
-                .trim()
-                .parse::<u32>()
-                .ok()
-        })
-        .max()
+        }
+        cores.sort_by_key(|(idx, _)| *idx);
+        return cores.into_iter().map(|(_, t)| t).collect();
+    }
+    Vec::new()
+}
+
+/// Read the CPU package temperature from hwmon coretemp driver.
+/// Returns the highest temp1_input (package) from any coretemp hwmon device.
+fn read_coretemp_package() -> Option<f64> {
+    let entries = fs::read_dir("/sys/class/hwmon").ok()?;
+    for hwmon in entries.flatten() {
+        let name_path = hwmon.path().join("name");
+        let name = fs::read_to_string(&name_path).unwrap_or_default();
+        if !name.trim().eq_ignore_ascii_case("coretemp") {
+            continue;
+        }
+        // temp1_input is conventionally the package-level sensor in coretemp
+        if let Ok(raw) = fs::read_to_string(hwmon.path().join("temp1_input")) {
+            if let Ok(v) = raw.trim().parse::<f64>() {
+                let temp = if v > 200.0 { v / 1000.0 } else { v };
+                if (0.0..=120.0).contains(&temp) {
+                    return Some(temp);
+                }
+            }
+        }
+    }
+    None
+}
+
+fn read_fan_speed() -> Option<u32> {
+    // Search both /sys/class/hwmon/hwmonN/ directly and any device/ subdirectory
+    let hwmons = fs::read_dir("/sys/class/hwmon").ok()?;
+    let mut max_rpm: Option<u32> = None;
+
+    for hwmon in hwmons.flatten() {
+        let base = hwmon.path();
+        // Some kernels expose sensors under hwmonN/device/, others directly under hwmonN/
+        let search_dirs = [base.clone(), base.join("device")];
+        for dir in &search_dirs {
+            let Ok(entries) = fs::read_dir(dir) else {
+                continue;
+            };
+            for entry in entries.flatten() {
+                let fname = entry.file_name().to_string_lossy().to_string();
+                if fname.starts_with("fan") && fname.ends_with("_input") {
+                    if let Ok(raw) = fs::read_to_string(entry.path()) {
+                        if let Ok(rpm) = raw.trim().parse::<u32>() {
+                            max_rpm = Some(max_rpm.map_or(rpm, |cur| cur.max(rpm)));
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    max_rpm
 }
 
 fn read_hostname() -> String {
