@@ -1,10 +1,11 @@
 use ratatui::{
     layout::{Constraint, Direction, Layout, Rect},
     style::{Modifier, Style},
-    widgets::{Block, Borders, Gauge, Paragraph, Row, Table},
+    widgets::{Block, Borders, Paragraph, Row, Table},
     Frame,
 };
 
+use super::render_compact_gauge;
 use crate::domain::battery_types::{BatterySnapshot, PowerState};
 use crate::tui::theme::{
     COLOR_DANGER, COLOR_MUTED, COLOR_PRIMARY, COLOR_SECONDARY, COLOR_SUCCESS, COLOR_TEXT,
@@ -45,16 +46,14 @@ fn render_header_card(frame: &mut Frame, area: Rect, b: &BatterySnapshot) {
     } else {
         "🚨 ON BATTERY (UPS MODE)"
     };
-    let gauge = Gauge::default()
-        .block(
-            Block::default()
-                .borders(Borders::ALL)
-                .title(format!(" 🔋 Battery Capacity • {ac_badge} ")),
-        )
-        .gauge_style(Style::default().fg(bat_color))
-        .percent(b.capacity as u16)
-        .label(format!("{}% — {}", b.capacity, b.state.as_str()));
-    frame.render_widget(gauge, cols[0]);
+    render_compact_gauge(
+        frame,
+        cols[0],
+        format!(" 🔋 Battery Capacity • {ac_badge} "),
+        bat_color,
+        b.capacity as u16,
+        format!("{}% — {}", b.capacity, b.state.as_str()),
+    );
 
     // Health Card
     let health_color = if b.health_percent > 80.0 {

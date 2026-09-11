@@ -1,10 +1,11 @@
 use ratatui::{
     layout::{Constraint, Direction, Layout, Rect},
     style::{Modifier, Style},
-    widgets::{Block, Borders, Gauge, Paragraph, Row, Table},
+    widgets::{Block, Borders, Paragraph, Row, Table},
     Frame,
 };
 
+use super::render_compact_gauge;
 use crate::domain::battery_types::BatterySnapshot;
 use crate::domain::models::ServerSnapshot;
 use crate::tui::theme::{
@@ -51,62 +52,56 @@ fn render_gauges(
     let sys = &snapshot.system;
 
     // CPU Gauge
-    let cpu_gauge = Gauge::default()
-        .block(
-            Block::default()
-                .borders(Borders::ALL)
-                .title(" ⚡ CPU Load "),
-        )
-        .gauge_style(Style::default().fg(if sys.cpu_percent > 85.0 {
+    render_compact_gauge(
+        frame,
+        cols[0],
+        " ⚡ CPU Load ".to_string(),
+        if sys.cpu_percent > 85.0 {
             COLOR_DANGER
         } else {
             COLOR_PRIMARY
-        }))
-        .percent(sys.cpu_percent.min(100.0) as u16)
-        .label(format!("{:.1}%", sys.cpu_percent));
-    frame.render_widget(cpu_gauge, cols[0]);
+        },
+        sys.cpu_percent.min(100.0) as u16,
+        format!("{:.1}%", sys.cpu_percent),
+    );
 
     // RAM Gauge
     let ram_pct = sys.mem_percent();
-    let ram_gauge = Gauge::default()
-        .block(
-            Block::default()
-                .borders(Borders::ALL)
-                .title(" 🧠 Memory (RAM) "),
-        )
-        .gauge_style(Style::default().fg(if ram_pct > 85.0 {
+    render_compact_gauge(
+        frame,
+        cols[1],
+        " 🧠 Memory (RAM) ".to_string(),
+        if ram_pct > 85.0 {
             COLOR_DANGER
         } else {
             COLOR_SECONDARY
-        }))
-        .percent(ram_pct.min(100.0) as u16)
-        .label(format!(
+        },
+        ram_pct.min(100.0) as u16,
+        format!(
             "{:.1}% ({:.1}G)",
             ram_pct,
             sys.mem_used_bytes as f64 / 1_073_741_824.0
-        ));
-    frame.render_widget(ram_gauge, cols[1]);
+        ),
+    );
 
     // Root Disk Gauge
     let disk_pct = sys.disk_percent();
-    let disk_gauge = Gauge::default()
-        .block(
-            Block::default()
-                .borders(Borders::ALL)
-                .title(" 💾 Root Disk (/) "),
-        )
-        .gauge_style(Style::default().fg(if disk_pct > 85.0 {
+    render_compact_gauge(
+        frame,
+        cols[2],
+        " 💾 Root Disk (/) ".to_string(),
+        if disk_pct > 85.0 {
             COLOR_DANGER
         } else {
             COLOR_SUCCESS
-        }))
-        .percent(disk_pct.min(100.0) as u16)
-        .label(format!(
+        },
+        disk_pct.min(100.0) as u16,
+        format!(
             "{:.1}% ({:.0}G)",
             disk_pct,
             sys.disk_used_bytes as f64 / 1_000_000_000.0
-        ));
-    frame.render_widget(disk_gauge, cols[2]);
+        ),
+    );
 
     // Battery mini Gauge
     let bat_color = if battery.capacity > 50 {
@@ -121,20 +116,14 @@ fn render_gauges(
     } else {
         "🔋 UPS"
     };
-    let bat_gauge = Gauge::default()
-        .block(
-            Block::default()
-                .borders(Borders::ALL)
-                .title(format!(" 🔋 Battery ({ac_label}) ")),
-        )
-        .gauge_style(Style::default().fg(bat_color))
-        .percent(battery.capacity as u16)
-        .label(format!(
-            "{}% ({})",
-            battery.capacity,
-            battery.state.as_str()
-        ));
-    frame.render_widget(bat_gauge, cols[3]);
+    render_compact_gauge(
+        frame,
+        cols[3],
+        format!(" 🔋 Battery ({ac_label}) "),
+        bat_color,
+        battery.capacity as u16,
+        format!("{}% ({})", battery.capacity, battery.state.as_str()),
+    );
 }
 
 fn render_containers_and_ssh(frame: &mut Frame, area: Rect, snapshot: &ServerSnapshot) {
