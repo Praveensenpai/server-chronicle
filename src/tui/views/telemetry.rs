@@ -1,7 +1,8 @@
 use ratatui::{
     layout::{Constraint, Direction, Layout, Rect},
     style::{Modifier, Style},
-    widgets::{Block, Borders, Paragraph, Row, Table},
+    text::{Line, Span},
+    widgets::{Block, Borders, Gauge, Paragraph, Row, Table},
     Frame,
 };
 
@@ -51,19 +52,7 @@ fn render_gauges(
 
     let sys = &snapshot.system;
 
-    // CPU Gauge
-    render_compact_gauge(
-        frame,
-        cols[0],
-        " ⚡ CPU Load ".to_string(),
-        if sys.cpu_percent > 85.0 {
-            COLOR_DANGER
-        } else {
-            COLOR_PRIMARY
-        },
-        sys.cpu_percent.min(100.0) as u16,
-        format!("{:.1}%", sys.cpu_percent),
-    );
+    render_cpu_gauge(frame, cols[0], sys);
 
     // RAM Gauge
     let ram_pct = sys.mem_percent();
@@ -124,6 +113,49 @@ fn render_gauges(
         battery.capacity as u16,
         format!("{}% ({})", battery.capacity, battery.state.as_str()),
     );
+}
+
+fn render_cpu_gauge(frame: &mut Frame, area: Rect, sys: &crate::domain::models::SystemMetrics) {
+    let color = if sys.cpu_percent > 85.0 {
+        COLOR_DANGER
+    } else {
+        COLOR_PRIMARY
+    };
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .title(" ⚡ CPU Load ");
+    let inner = block.inner(area);
+    frame.render_widget(block, area);
+    if inner.is_empty() {
+        return;
+    }
+
+    let gauge_area = Rect::new(inner.x, inner.y, inner.width, 1);
+    let gauge = Gauge::default()
+        .gauge_style(Style::default().fg(color))
+        .percent(sys.cpu_percent.min(100.0) as u16)
+        .label(Span::styled(
+            format!("{:.1}%", sys.cpu_percent),
+            Style::default()
+                .fg(ratatui::style::Color::Black)
+                .bg(color)
+                .add_modifier(Modifier::BOLD),
+        ));
+    frame.render_widget(gauge, gauge_area);
+
+    let temperature = sys
+        .cpu_temp_c
+        .map_or_else(|| "--".to_string(), |value| format!("{value:.1}°C"));
+    let fan_speed = sys
+        .fan_speed_rpm
+        .map_or_else(|| "--".to_string(), |value| format!("{value} RPM"));
+    let details = Paragraph::new(vec![
+        Line::from(format!("🌡 Temp: {temperature}")),
+        Line::from(format!("🌀 Fan:  {fan_speed}")),
+    ])
+    .style(Style::default().fg(COLOR_MUTED));
+    let details_area = Rect::new(inner.x, inner.y.saturating_add(2), inner.width, 2);
+    frame.render_widget(details, details_area);
 }
 
 fn render_containers_and_ssh(frame: &mut Frame, area: Rect, snapshot: &ServerSnapshot) {

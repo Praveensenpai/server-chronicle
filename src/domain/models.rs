@@ -93,6 +93,8 @@ pub struct TorrentSnapshot {
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct SystemMetrics {
     pub cpu_percent: f64,
+    pub cpu_temp_c: Option<f64>,
+    pub fan_speed_rpm: Option<u32>,
     pub mem_used_bytes: u64,
     pub mem_total_bytes: u64,
     pub swap_used_bytes: u64,

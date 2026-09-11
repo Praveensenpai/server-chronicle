@@ -11,9 +11,13 @@ pub fn read_system_metrics() -> SystemMetrics {
     let (mem_used_bytes, mem_total_bytes, swap_used_bytes, swap_total_bytes) = read_meminfo();
     let (disk_used_bytes, disk_total_bytes) = read_disk_space("/");
     let cpu_percent = read_cpu_percent();
+    let cpu_temp_c = read_cpu_temperature();
+    let fan_speed_rpm = read_fan_speed();
 
     SystemMetrics {
         cpu_percent,
+        cpu_temp_c,
+        fan_speed_rpm,
         mem_used_bytes,
         mem_total_bytes,
         swap_used_bytes,
@@ -24,6 +28,67 @@ pub fn read_system_metrics() -> SystemMetrics {
         uptime_secs,
         hostname,
     }
+}
+
+fn read_cpu_temperature() -> Option<f64> {
+    let entries = fs::read_dir("/sys/class/thermal").ok()?;
+    let mut selected: Option<(i32, f64)> = None;
+
+    for entry in entries.flatten() {
+        let name = entry.file_name().to_string_lossy().to_string();
+        if !name.starts_with("thermal_zone") {
+            continue;
+        }
+
+        let Ok(raw_value) = fs::read_to_string(entry.path().join("temp")) else {
+            continue;
+        };
+        let Ok(value) = raw_value.trim().parse::<f64>() else {
+            continue;
+        };
+        let temperature = if value.abs() > 200.0 {
+            value / 1000.0
+        } else {
+            value
+        };
+        let sensor_type = fs::read_to_string(entry.path().join("type")).unwrap_or_default();
+        let sensor_type = sensor_type.to_ascii_lowercase();
+        let score = if sensor_type.contains("package") {
+            4
+        } else if sensor_type.contains("cpu") || sensor_type.contains("core") {
+            3
+        } else if sensor_type.contains("x86") {
+            2
+        } else {
+            1
+        };
+
+        if selected.is_none_or(|(current_score, _)| score > current_score) {
+            selected = Some((score, temperature));
+        }
+    }
+
+    selected.map(|(_, temperature)| temperature)
+}
+
+fn read_fan_speed() -> Option<u32> {
+    let entries = fs::read_dir("/sys/class/hwmon").ok()?;
+    entries
+        .flatten()
+        .flat_map(|entry| fs::read_dir(entry.path()).into_iter().flatten())
+        .filter_map(Result::ok)
+        .filter_map(|entry| {
+            let name = entry.file_name().to_string_lossy().to_string();
+            if !name.starts_with("fan") || !name.ends_with("_input") {
+                return None;
+            }
+            fs::read_to_string(entry.path())
+                .ok()?
+                .trim()
+                .parse::<u32>()
+                .ok()
+        })
+        .max()
 }
 
 fn read_hostname() -> String {
