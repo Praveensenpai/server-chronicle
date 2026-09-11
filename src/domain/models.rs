@@ -212,6 +212,8 @@ pub struct SystemMetrics {
     pub cpu_temp_c: Option<f64>,
     pub cpu_core_temps_c: Vec<f64>,
     pub fan_speed_rpm: Option<u32>,
+    #[serde(default)]
+    pub fan_status: String,
     pub mem_used_bytes: u64,
     pub mem_total_bytes: u64,
     pub swap_used_bytes: u64,
@@ -224,6 +226,15 @@ pub struct SystemMetrics {
 }
 
 impl SystemMetrics {
+    #[must_use]
+    pub fn fan_display(&self) -> &str {
+        if !self.fan_status.is_empty() {
+            &self.fan_status
+        } else {
+            "N/A"
+        }
+    }
+
     #[must_use]
     pub fn mem_percent(&self) -> f64 {
         if self.mem_total_bytes == 0 {

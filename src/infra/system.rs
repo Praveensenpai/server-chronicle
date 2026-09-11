@@ -13,13 +13,14 @@ pub fn read_system_metrics() -> SystemMetrics {
     let cpu_percent = read_cpu_percent();
     let cpu_temp_c = read_cpu_temperature();
     let cpu_core_temps_c = read_cpu_core_temps();
-    let fan_speed_rpm = read_fan_speed();
+    let (fan_speed_rpm, fan_status) = read_fan_info();
 
     SystemMetrics {
         cpu_percent,
         cpu_temp_c,
         cpu_core_temps_c,
         fan_speed_rpm,
+        fan_status,
         mem_used_bytes,
         mem_total_bytes,
         swap_used_bytes,
@@ -32,7 +33,7 @@ pub fn read_system_metrics() -> SystemMetrics {
     }
 }
 
-use crate::infra::thermal::{read_cpu_core_temps, read_cpu_temperature, read_fan_speed};
+use crate::infra::thermal::{read_cpu_core_temps, read_cpu_temperature, read_fan_info};
 
 fn read_hostname() -> String {
     Command::new("hostname").output().map_or_else(

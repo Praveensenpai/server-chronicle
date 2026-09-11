@@ -165,9 +165,7 @@ fn render_system_section(doc: &mut String, snap: &ServerSnapshot) {
         sys.disk_used_bytes as f64 / (1000.0 * 1000.0 * 1000.0),
         sys.disk_total_bytes as f64 / (1000.0 * 1000.0 * 1000.0)
     );
-    let fan_str = sys
-        .fan_speed_rpm
-        .map_or_else(|| "N/A".to_string(), |r| format!("{r} RPM"));
+    let fan_str = sys.fan_display();
     let _ = writeln!(doc, "- **Fan Speed**: {fan_str}");
     let _ = writeln!(
         doc,

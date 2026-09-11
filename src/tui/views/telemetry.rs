@@ -137,9 +137,7 @@ fn render_cpu_gauge(frame: &mut Frame, area: Rect, sys: &crate::domain::models::
     let temp_str = sys
         .cpu_temp_c
         .map_or_else(|| "N/A".to_string(), |t| format!("{t:.1}°C"));
-    let fan_str = sys
-        .fan_speed_rpm
-        .map_or_else(|| "N/A".to_string(), |r| format!("{r} RPM"));
+    let fan_str = sys.fan_display();
     let cores_str = if sys.cpu_core_temps_c.is_empty() {
         String::new()
     } else {

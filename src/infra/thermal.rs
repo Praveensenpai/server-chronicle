@@ -110,10 +110,26 @@ fn read_coretemp_package() -> Option<f64> {
 }
 
 pub fn read_fan_speed() -> Option<u32> {
-    if let Some(rpm) = read_fan_speed_from_ec() {
-        return Some(rpm);
+    read_fan_speed_from_hwmon().or_else(read_fan_speed_from_ec)
+}
+
+pub fn read_fan_info() -> (Option<u32>, String) {
+    if let Some(rpm) = read_fan_speed() {
+        return (Some(rpm), format!("{rpm} RPM"));
     }
 
+    if let Some(acpi_status) = read_acpi_cooling_fan_status() {
+        return (None, acpi_status);
+    }
+
+    if let Some(pwm_status) = read_hwmon_pwm_status() {
+        return (None, pwm_status);
+    }
+
+    (None, "N/A".to_string())
+}
+
+fn read_fan_speed_from_hwmon() -> Option<u32> {
     let hwmons = fs::read_dir("/sys/class/hwmon").ok()?;
     let mut max_rpm: Option<u32> = None;
 
@@ -142,6 +158,54 @@ pub fn read_fan_speed() -> Option<u32> {
     max_rpm
 }
 
+fn read_acpi_cooling_fan_status() -> Option<String> {
+    let entries = fs::read_dir("/sys/class/thermal").ok()?;
+
+    for entry in entries.flatten() {
+        let path = entry.path();
+        let fname = entry.file_name().to_string_lossy().to_string();
+        if !fname.starts_with("cooling_device") {
+            continue;
+        }
+
+        let type_path = path.join("type");
+        let Ok(type_str) = fs::read_to_string(type_path) else {
+            continue;
+        };
+
+        if type_str.trim().eq_ignore_ascii_case("fan") {
+            let cur_state = fs::read_to_string(path.join("cur_state"))
+                .ok()
+                .and_then(|s| s.trim().parse::<u32>().ok())
+                .unwrap_or(0);
+
+            let status = if cur_state > 0 {
+                "Auto (Active)".to_string()
+            } else {
+                "Auto (Silent)".to_string()
+            };
+            return Some(status);
+        }
+    }
+
+    None
+}
+
+fn read_hwmon_pwm_status() -> Option<String> {
+    let hwmons = fs::read_dir("/sys/class/hwmon").ok()?;
+
+    for hwmon in hwmons.flatten() {
+        let pwm_enable_path = hwmon.path().join("pwm1_enable");
+        if let Ok(val) = fs::read_to_string(pwm_enable_path) {
+            if val.trim() == "2" {
+                return Some("Auto (BIOS)".to_string());
+            }
+        }
+    }
+
+    None
+}
+
 fn read_fan_speed_from_ec() -> Option<u32> {
     const EC_IO_PATH: &str = "/sys/kernel/debug/ec/ec0/io";
     const FAN_OFFSET: usize = 0x70;
@@ -160,4 +224,20 @@ fn read_fan_speed_from_ec() -> Option<u32> {
     }
 
     Some(rpm)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_read_fan_info_structure() {
+        let (rpm, status) = read_fan_info();
+        if let Some(r) = rpm {
+            assert!(r > 0);
+            assert!(status.contains("RPM"));
+        } else {
+            assert!(!status.is_empty());
+        }
+    }
 }
