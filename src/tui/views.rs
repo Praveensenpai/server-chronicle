@@ -4,7 +4,8 @@ pub mod telemetry;
 
 use ratatui::{
     layout::Rect,
-    style::{Color, Style},
+    style::{Color, Modifier, Style},
+    text::Span,
     widgets::{Block, Borders, Gauge},
     Frame,
 };
@@ -38,6 +39,12 @@ pub fn render_compact_gauge(
     let gauge = Gauge::default()
         .gauge_style(Style::default().fg(color))
         .percent(percent)
-        .label(label);
+        .label(Span::styled(
+            label,
+            Style::default()
+                .fg(Color::Black)
+                .bg(color)
+                .add_modifier(Modifier::BOLD),
+        ));
     frame.render_widget(gauge, gauge_area);
 }
