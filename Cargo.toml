@@ -1,6 +1,6 @@
 [package]
 name = "server-chronicle"
-version = "0.1.2"
+version = "0.1.3"
 edition = "2021"
 authors = ["Praveensenpai <pvnt20@gmail.com>"]
 description = "⏱️ Server activity logger, battery UPS monitor, Ratatui TUI, and AI context generator for Ubuntu Server"
