@@ -49,10 +49,20 @@ impl App {
         }
     }
 
-    pub fn refresh(&mut self) {
-        self.snapshot = capture_server_snapshot();
-        self.battery = read_battery_snapshot();
-        self.events = read_today_events();
+    pub fn apply_telemetry(
+        &mut self,
+        snapshot: ServerSnapshot,
+        battery: BatterySnapshot,
+        events: Vec<EventRecord>,
+    ) {
+        self.snapshot = snapshot;
+        self.battery = battery;
+        self.events = events;
+        if !self.snapshot.top_processes.is_empty()
+            && self.selected_proc_idx >= self.snapshot.top_processes.len()
+        {
+            self.selected_proc_idx = self.snapshot.top_processes.len() - 1;
+        }
     }
 
     pub fn cycle_tab(&mut self) {
@@ -83,10 +93,17 @@ impl App {
 
     pub fn kill_selected_process(&mut self) -> Result<()> {
         if let Some(proc) = self.snapshot.top_processes.get(self.selected_proc_idx) {
-            let pid_str = proc.pid.to_string();
+            let pid = proc.pid;
+            let name = proc.name.clone();
+            let pid_str = pid.to_string();
             let _ = Command::new("kill").args(["-15", &pid_str]).output();
-            self.set_status(format!("Sent SIGTERM to {} (PID {})", proc.name, proc.pid));
-            self.refresh();
+            self.set_status(format!("Sent SIGTERM to {name} (PID {pid})"));
+            self.snapshot.top_processes.retain(|p| p.pid != pid);
+            if !self.snapshot.top_processes.is_empty()
+                && self.selected_proc_idx >= self.snapshot.top_processes.len()
+            {
+                self.selected_proc_idx = self.snapshot.top_processes.len() - 1;
+            }
         }
         self.show_kill_modal = false;
         Ok(())

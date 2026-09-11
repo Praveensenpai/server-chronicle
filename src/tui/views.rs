@@ -140,3 +140,153 @@ pub fn centered_rect(percent_x: u16, percent_y: u16, r: Rect) -> Rect {
         ])
         .split(popup_layout[1])[1]
 }
+
+pub fn render_header(frame: &mut Frame, area: Rect, app: &crate::tui::app::App) {
+    use crate::tui::app::ActiveTab;
+    use crate::tui::theme::{COLOR_BORDER, COLOR_MUTED, COLOR_PRIMARY};
+    use ratatui::{
+        layout::{Constraint, Direction, Layout},
+        text::Line,
+        widgets::{Paragraph, Tabs},
+    };
+
+    let has_room = area.width >= 90;
+    let constraints = if has_room {
+        vec![
+            Constraint::Length(22),
+            Constraint::Min(38),
+            Constraint::Length(26),
+        ]
+    } else {
+        vec![Constraint::Length(22), Constraint::Min(20)]
+    };
+
+    let cols = Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints(constraints)
+        .split(area);
+
+    let title_line = Line::from(vec![Span::styled(
+        " ⏱ CHRONICLE ",
+        Style::default()
+            .fg(COLOR_PRIMARY)
+            .add_modifier(Modifier::BOLD),
+    )]);
+    let title_block = Block::default()
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(COLOR_BORDER));
+    frame.render_widget(Paragraph::new(title_line).block(title_block), cols[0]);
+
+    let tab_titles = vec![
+        " [1] 🖥️ Telemetry ",
+        " [2] 🔋 Battery UPS ",
+        " [3] 📜 Chronicle ",
+    ];
+    let selected_idx = match app.active_tab {
+        ActiveTab::Telemetry => 0,
+        ActiveTab::Battery => 1,
+        ActiveTab::Chronicle => 2,
+    };
+
+    let tabs = Tabs::new(tab_titles)
+        .select(selected_idx)
+        .block(
+            Block::default()
+                .borders(Borders::ALL)
+                .border_style(Style::default().fg(COLOR_BORDER)),
+        )
+        .style(Style::default().fg(COLOR_MUTED))
+        .highlight_style(
+            Style::default()
+                .fg(COLOR_PRIMARY)
+                .add_modifier(Modifier::BOLD),
+        );
+    frame.render_widget(tabs, cols[1]);
+
+    if has_room && cols.len() > 2 {
+        render_host_badge(frame, cols[2], app);
+    }
+}
+
+fn render_host_badge(frame: &mut Frame, area: Rect, app: &crate::tui::app::App) {
+    use crate::tui::theme::{COLOR_BORDER, COLOR_MUTED, COLOR_PRIMARY, COLOR_SECONDARY};
+    use ratatui::{text::Line, widgets::Paragraph};
+
+    let uptime_h = app.snapshot.system.uptime_secs / 3600;
+    let uptime_d = uptime_h / 24;
+    let host_line = Line::from(vec![
+        Span::styled("🌐 ", Style::default().fg(COLOR_PRIMARY)),
+        Span::styled(
+            &app.snapshot.system.hostname,
+            Style::default()
+                .fg(COLOR_SECONDARY)
+                .add_modifier(Modifier::BOLD),
+        ),
+        Span::styled(
+            format!(" • ⬆️ {}d {}h", uptime_d, uptime_h % 24),
+            Style::default().fg(COLOR_MUTED),
+        ),
+    ]);
+    let host_p = Paragraph::new(host_line).block(
+        Block::default()
+            .borders(Borders::ALL)
+            .border_style(Style::default().fg(COLOR_BORDER)),
+    );
+    frame.render_widget(host_p, area);
+}
+
+pub fn render_footer(frame: &mut Frame, area: Rect, app: &crate::tui::app::App) {
+    use crate::tui::theme::{
+        COLOR_DANGER, COLOR_MUTED, COLOR_PRIMARY, COLOR_SECONDARY, COLOR_SUCCESS, COLOR_WARNING,
+    };
+    use ratatui::{text::Line, widgets::Paragraph};
+
+    if let Some((msg, _)) = &app.status_message {
+        let p = Paragraph::new(format!("  {msg}")).style(
+            Style::default()
+                .fg(COLOR_SUCCESS)
+                .add_modifier(Modifier::BOLD),
+        );
+        frame.render_widget(p, area);
+        return;
+    }
+
+    let keys = vec![
+        Span::styled(
+            " [Tab/1-3]",
+            Style::default()
+                .fg(COLOR_PRIMARY)
+                .add_modifier(Modifier::BOLD),
+        ),
+        Span::styled(" Views ", Style::default().fg(COLOR_MUTED)),
+        Span::styled(
+            "[e]",
+            Style::default()
+                .fg(COLOR_SECONDARY)
+                .add_modifier(Modifier::BOLD),
+        ),
+        Span::styled(" AI Export ", Style::default().fg(COLOR_MUTED)),
+        Span::styled(
+            "[K]",
+            Style::default()
+                .fg(COLOR_DANGER)
+                .add_modifier(Modifier::BOLD),
+        ),
+        Span::styled(" Kill Proc ", Style::default().fg(COLOR_MUTED)),
+        Span::styled(
+            "[/]",
+            Style::default()
+                .fg(COLOR_WARNING)
+                .add_modifier(Modifier::BOLD),
+        ),
+        Span::styled(" Filter ", Style::default().fg(COLOR_MUTED)),
+        Span::styled(
+            "[q]",
+            Style::default()
+                .fg(COLOR_MUTED)
+                .add_modifier(Modifier::BOLD),
+        ),
+        Span::styled(" Exit", Style::default().fg(COLOR_MUTED)),
+    ];
+    frame.render_widget(Paragraph::new(Line::from(keys)), area);
+}
