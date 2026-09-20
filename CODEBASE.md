@@ -142,6 +142,8 @@ cargo fmt --check
 ```
 
 ## 6. Recent Iteration Changes
+- **2026-09-20 (v0.1.16)**:
+  - `src/tui/views/telemetry.rs`: Implemented windowed viewport scrolling in `render_processes()` to seamlessly browse all processes via `j`/`k` regardless of terminal window height, with `(X/Y)` position indicator.
 - **2026-09-20 (v0.1.15)**:
   - `src/infra/system.rs`: Added `resolve_process_name()` to dynamically detect interpreter scripts/modules (e.g. `python3: spotiflac_bot`, `node: app.js`) from command args.
 - **2026-09-20 (v0.1.14)**:

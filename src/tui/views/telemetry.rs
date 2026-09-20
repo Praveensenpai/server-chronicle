@@ -208,10 +208,20 @@ fn render_processes(
     selected: usize,
     sort_mode: ProcessSortMode,
 ) {
+    let total_procs = snapshot.top_processes.len();
+    let visible_capacity = (area.height.saturating_sub(3) as usize).max(1);
+    let offset = if selected >= visible_capacity {
+        selected - visible_capacity + 1
+    } else {
+        0
+    };
+
     let rows: Vec<Row> = snapshot
         .top_processes
         .iter()
         .enumerate()
+        .skip(offset)
+        .take(visible_capacity)
         .map(|(i, p)| {
             let is_sel = i == selected;
             let cursor = if is_sel { "▶ " } else { "  " };
@@ -233,6 +243,12 @@ fn render_processes(
         .collect();
 
     let sort_label = sort_mode.label();
+    let pos_hint = if total_procs > 0 {
+        format!(" ({}/{})", selected + 1, total_procs)
+    } else {
+        String::new()
+    };
+
     let table = Table::new(
         rows,
         [
@@ -254,7 +270,7 @@ fn render_processes(
             .borders(Borders::ALL)
             .border_style(Style::default().fg(COLOR_BORDER))
             .title(format!(
-                " ⚙️ Top Resource Processes [Sort: {sort_label} ▼] (Press 's' to sort, 'K' to kill) "
+                " ⚙️ Top Resource Processes [Sort: {sort_label} ▼]{pos_hint} (Press 's' to sort, 'K' to kill) "
             )),
     );
 
