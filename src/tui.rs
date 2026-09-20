@@ -21,7 +21,7 @@ use std::thread;
 use std::time::Duration;
 
 use crate::domain::battery_types::BatterySnapshot;
-use crate::domain::models::{EventRecord, ServerSnapshot};
+use crate::domain::models::{EventRecord, ProcessSortMode, ServerSnapshot};
 use crate::infra::{
     battery::read_battery_snapshot, capture_server_snapshot, storage::read_today_events,
 };
@@ -169,6 +169,15 @@ fn handle_navigation_key(app: &mut App, code: KeyCode) -> bool {
         KeyCode::Char('K') if app.active_tab == ActiveTab::Telemetry => {
             app.show_kill_modal = true;
         }
+        KeyCode::Char('s') if app.active_tab == ActiveTab::Telemetry => {
+            app.toggle_process_sort();
+        }
+        KeyCode::Char('c') if app.active_tab == ActiveTab::Telemetry => {
+            app.set_process_sort(ProcessSortMode::Cpu);
+        }
+        KeyCode::Char('m') if app.active_tab == ActiveTab::Telemetry => {
+            app.set_process_sort(ProcessSortMode::Ram);
+        }
         KeyCode::Down | KeyCode::Char('j') => handle_scroll_down(app),
         KeyCode::Up | KeyCode::Char('k') => handle_scroll_up(app),
         _ => {}
@@ -218,6 +227,7 @@ fn ui(frame: &mut Frame, app: &App) {
                 &app.snapshot,
                 &app.battery,
                 app.selected_proc_idx,
+                app.proc_sort_mode,
             );
         }
         ActiveTab::Battery => {

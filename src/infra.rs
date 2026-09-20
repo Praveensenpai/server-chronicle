@@ -13,7 +13,7 @@ pub fn capture_server_snapshot() -> ServerSnapshot {
     let containers = docker::read_containers();
     let ssh_sessions = ssh::read_active_ssh_sessions();
     let torrents = torrent::read_torrents();
-    let top_processes = system::read_top_processes(15);
+    let top_processes = system::read_top_processes(20);
 
     ServerSnapshot {
         system,

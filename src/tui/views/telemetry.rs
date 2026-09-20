@@ -9,7 +9,7 @@ use ratatui::{
 use super::render_compact_gauge;
 use super::services::render_containers_and_ssh;
 use crate::domain::battery_types::BatterySnapshot;
-use crate::domain::models::ServerSnapshot;
+use crate::domain::models::{ProcessSortMode, ServerSnapshot};
 use crate::tui::theme::{
     COLOR_BORDER, COLOR_DANGER, COLOR_MUTED, COLOR_PRIMARY, COLOR_SECONDARY, COLOR_SUCCESS,
     COLOR_WARNING,
@@ -21,6 +21,7 @@ pub fn render_telemetry(
     snapshot: &ServerSnapshot,
     battery: &BatterySnapshot,
     selected_proc_idx: usize,
+    sort_mode: ProcessSortMode,
 ) {
     let chunks = Layout::default()
         .direction(Direction::Vertical)
@@ -33,7 +34,7 @@ pub fn render_telemetry(
 
     render_gauges(frame, chunks[0], snapshot, battery);
     render_containers_and_ssh(frame, chunks[1], snapshot);
-    render_processes(frame, chunks[2], snapshot, selected_proc_idx);
+    render_processes(frame, chunks[2], snapshot, selected_proc_idx, sort_mode);
 }
 
 fn render_gauges(
@@ -200,7 +201,13 @@ fn render_cpu_gauge(frame: &mut Frame, area: Rect, sys: &crate::domain::models::
     }
 }
 
-fn render_processes(frame: &mut Frame, area: Rect, snapshot: &ServerSnapshot, selected: usize) {
+fn render_processes(
+    frame: &mut Frame,
+    area: Rect,
+    snapshot: &ServerSnapshot,
+    selected: usize,
+    sort_mode: ProcessSortMode,
+) {
     let rows: Vec<Row> = snapshot
         .top_processes
         .iter()
@@ -220,22 +227,25 @@ fn render_processes(frame: &mut Frame, area: Rect, snapshot: &ServerSnapshot, se
                 p.name.clone(),
                 format!("{:.1}%", p.cpu_percent),
                 format!("{:.1}%", p.mem_percent),
+                p.formatted_mem(),
             ])
             .style(style)
         })
         .collect();
 
+    let sort_label = sort_mode.label();
     let table = Table::new(
         rows,
         [
-            Constraint::Length(10),
-            Constraint::Percentage(50),
-            Constraint::Percentage(20),
-            Constraint::Percentage(20),
+            Constraint::Length(10),     // PID
+            Constraint::Percentage(40), // Process Name
+            Constraint::Length(10),     // CPU %
+            Constraint::Length(10),     // MEM %
+            Constraint::Length(12),     // RAM Usage
         ],
     )
     .header(
-        Row::new(vec!["  PID", "Process Name", "CPU %", "MEM %"]).style(
+        Row::new(vec!["  PID", "Process Name", "CPU %", "MEM %", "RAM"]).style(
             Style::default()
                 .fg(COLOR_SECONDARY)
                 .add_modifier(Modifier::BOLD),
@@ -245,7 +255,9 @@ fn render_processes(frame: &mut Frame, area: Rect, snapshot: &ServerSnapshot, se
         Block::default()
             .borders(Borders::ALL)
             .border_style(Style::default().fg(COLOR_BORDER))
-            .title(" ⚙️ Top Resource Processes (Press 'K' to kill) "),
+            .title(format!(
+                " ⚙️ Top Resource Processes [Sort: {sort_label} ▼] (Press 's' to sort, 'K' to kill) "
+            )),
     );
 
     frame.render_widget(table, area);

@@ -251,6 +251,7 @@ pub fn render_footer(frame: &mut Frame, area: Rect, app: &crate::tui::app::App) 
         return;
     }
 
+    let sort_hint = format!(" Sort:{} ", app.proc_sort_mode.label());
     let keys = vec![
         Span::styled(
             " [Tab/1-3]",
@@ -259,6 +260,13 @@ pub fn render_footer(frame: &mut Frame, area: Rect, app: &crate::tui::app::App) 
                 .add_modifier(Modifier::BOLD),
         ),
         Span::styled(" Views ", Style::default().fg(COLOR_MUTED)),
+        Span::styled(
+            "[s]",
+            Style::default()
+                .fg(COLOR_PRIMARY)
+                .add_modifier(Modifier::BOLD),
+        ),
+        Span::styled(sort_hint, Style::default().fg(COLOR_MUTED)),
         Span::styled(
             "[e]",
             Style::default()

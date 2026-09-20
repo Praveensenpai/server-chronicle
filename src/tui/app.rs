@@ -3,7 +3,7 @@ use std::process::Command;
 
 use crate::api::export::generate_ai_report;
 use crate::domain::battery_types::BatterySnapshot;
-use crate::domain::models::{EventRecord, ServerSnapshot};
+use crate::domain::models::{EventRecord, ProcessItem, ProcessSortMode, ServerSnapshot};
 use crate::infra::{
     battery::read_battery_snapshot, capture_server_snapshot, storage::read_today_events,
 };
@@ -26,14 +26,17 @@ pub struct App {
     pub selected_proc_idx: usize,
     pub show_kill_modal: bool,
     pub status_message: Option<(String, std::time::Instant)>,
+    pub proc_sort_mode: ProcessSortMode,
 }
 
 impl App {
     #[must_use]
     pub fn new() -> Self {
-        let snapshot = capture_server_snapshot();
+        let mut snapshot = capture_server_snapshot();
         let battery = read_battery_snapshot();
         let events = read_today_events();
+        let proc_sort_mode = ProcessSortMode::Cpu;
+        Self::sort_process_list(&mut snapshot.top_processes, proc_sort_mode);
 
         Self {
             active_tab: ActiveTab::Telemetry,
@@ -46,15 +49,50 @@ impl App {
             selected_proc_idx: 0,
             show_kill_modal: false,
             status_message: None,
+            proc_sort_mode,
+        }
+    }
+
+    pub fn sort_process_list(processes: &mut [ProcessItem], mode: ProcessSortMode) {
+        match mode {
+            ProcessSortMode::Cpu => {
+                processes.sort_by(|a, b| b.cpu_percent.total_cmp(&a.cpu_percent));
+            }
+            ProcessSortMode::Ram => {
+                processes.sort_by_key(|p| std::cmp::Reverse(p.mem_bytes));
+            }
+        }
+    }
+
+    pub fn toggle_process_sort(&mut self) {
+        self.proc_sort_mode = self.proc_sort_mode.toggle();
+        Self::sort_process_list(&mut self.snapshot.top_processes, self.proc_sort_mode);
+        self.selected_proc_idx = 0;
+        self.set_status(format!(
+            "Sorted processes by {}",
+            self.proc_sort_mode.label()
+        ));
+    }
+
+    pub fn set_process_sort(&mut self, mode: ProcessSortMode) {
+        if self.proc_sort_mode != mode {
+            self.proc_sort_mode = mode;
+            Self::sort_process_list(&mut self.snapshot.top_processes, self.proc_sort_mode);
+            self.selected_proc_idx = 0;
+            self.set_status(format!(
+                "Sorted processes by {}",
+                self.proc_sort_mode.label()
+            ));
         }
     }
 
     pub fn apply_telemetry(
         &mut self,
-        snapshot: ServerSnapshot,
+        mut snapshot: ServerSnapshot,
         battery: BatterySnapshot,
         events: Vec<EventRecord>,
     ) {
+        Self::sort_process_list(&mut snapshot.top_processes, self.proc_sort_mode);
         self.snapshot = snapshot;
         self.battery = battery;
         self.events = events;
@@ -209,5 +247,31 @@ mod tests {
         assert_eq!(to_base64(b"fo"), "Zm8=");
         assert_eq!(to_base64(b"foo"), "Zm9v");
         assert_eq!(to_base64(b"Hello World!"), "SGVsbG8gV29ybGQh");
+    }
+
+    #[test]
+    fn test_sort_process_list() {
+        let mut list = vec![
+            ProcessItem {
+                pid: 1,
+                name: "cpu_hog".into(),
+                cpu_percent: 50.0,
+                mem_percent: 1.0,
+                mem_bytes: 100 * 1024 * 1024,
+            },
+            ProcessItem {
+                pid: 2,
+                name: "ram_hog".into(),
+                cpu_percent: 2.0,
+                mem_percent: 15.0,
+                mem_bytes: 1500 * 1024 * 1024,
+            },
+        ];
+
+        App::sort_process_list(&mut list, ProcessSortMode::Cpu);
+        assert_eq!(list[0].pid, 1);
+
+        App::sort_process_list(&mut list, ProcessSortMode::Ram);
+        assert_eq!(list[0].pid, 2);
     }
 }

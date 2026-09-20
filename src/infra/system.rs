@@ -182,34 +182,58 @@ pub fn normalize_process_cpu(raw_cpu: f64, num_cpus: usize) -> f64 {
     (raw_cpu / divisor).clamp(0.0, 100.0)
 }
 
-pub fn read_top_processes(limit: usize) -> Vec<ProcessItem> {
+pub fn parse_process_line(line: &str, num_cpus: usize) -> Option<ProcessItem> {
+    let parts: Vec<&str> = line.split_whitespace().collect();
+    if parts.len() < 5 {
+        return None;
+    }
+    let pid = parts[0].parse::<u32>().ok()?;
+    let len = parts.len();
+    let rss_kb = parts[len - 1].parse::<u64>().unwrap_or(0);
+    let mem_percent = parts[len - 2].parse::<f64>().unwrap_or(0.0);
+    let raw_cpu = parts[len - 3].parse::<f64>().unwrap_or(0.0);
+    let name = parts[1..len - 3].join(" ");
+    let cpu_percent = normalize_process_cpu(raw_cpu, num_cpus);
+    let mem_bytes = rss_kb.saturating_mul(1024);
+
+    Some(ProcessItem {
+        pid,
+        name,
+        cpu_percent,
+        mem_percent,
+        mem_bytes,
+    })
+}
+
+fn fetch_ps_processes(sort_arg: &str, sample_size: usize, num_cpus: usize) -> Vec<ProcessItem> {
     let Ok(out) = Command::new("ps")
-        .args(["-eo", "pid,comm,%cpu,%mem", "--sort=-%cpu"])
+        .args(["-eo", "pid,comm,%cpu,%mem,rss", sort_arg])
         .output()
     else {
         return Vec::new();
     };
 
     let s = String::from_utf8_lossy(&out.stdout);
-    let mut items = Vec::new();
-    let num_cpus = std::thread::available_parallelism().map_or(1, |n| n.get());
+    s.lines()
+        .skip(1)
+        .take(sample_size)
+        .filter_map(|line| parse_process_line(line, num_cpus))
+        .collect()
+}
 
-    for line in s.lines().skip(1).take(limit) {
-        let parts: Vec<&str> = line.split_whitespace().collect();
-        if parts.len() >= 4 {
-            let pid = parts[0].parse::<u32>().unwrap_or(0);
-            let name = parts[1].to_string();
-            let raw_cpu = parts[2].parse::<f64>().unwrap_or(0.0);
-            let cpu_percent = normalize_process_cpu(raw_cpu, num_cpus);
-            let mem_percent = parts[3].parse::<f64>().unwrap_or(0.0);
-            items.push(ProcessItem {
-                pid,
-                name,
-                cpu_percent,
-                mem_percent,
-            });
-        }
+pub fn read_top_processes(limit: usize) -> Vec<ProcessItem> {
+    let num_cpus = std::thread::available_parallelism().map_or(1, |n| n.get());
+    let mut map = std::collections::HashMap::new();
+
+    for proc in fetch_ps_processes("--sort=-%cpu", limit, num_cpus) {
+        map.insert(proc.pid, proc);
     }
+    for proc in fetch_ps_processes("--sort=-rss", limit, num_cpus) {
+        map.entry(proc.pid).or_insert(proc);
+    }
+
+    let mut items: Vec<ProcessItem> = map.into_values().collect();
+    items.sort_by(|a, b| b.cpu_percent.total_cmp(&a.cpu_percent));
     items
 }
 
@@ -247,5 +271,23 @@ mod tests {
         // Edge cases
         assert_eq!(normalize_process_cpu(500.0, 4), 100.0);
         assert_eq!(normalize_process_cpu(50.0, 0), 50.0);
+    }
+
+    #[test]
+    fn test_parse_process_line() {
+        let line = " 2471 jellyfin 1.2 4.6 344052";
+        let proc = parse_process_line(line, 1).expect("must parse valid ps line");
+        assert_eq!(proc.pid, 2471);
+        assert_eq!(proc.name, "jellyfin");
+        assert!((proc.cpu_percent - 1.2).abs() < 0.01);
+        assert!((proc.mem_percent - 4.6).abs() < 0.01);
+        assert_eq!(proc.mem_bytes, 344052 * 1024);
+
+        let space_line = " 920178 tmux: server 0.5 0.2 6360";
+        let proc2 = parse_process_line(space_line, 1).expect("must parse multi-word command name");
+        assert_eq!(proc2.name, "tmux: server");
+        assert_eq!(proc2.mem_bytes, 6360 * 1024);
+
+        assert!(parse_process_line("invalid", 1).is_none());
     }
 }

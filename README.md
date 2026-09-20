@@ -148,6 +148,8 @@ server-chronicle battery
 | **`2`** | **Battery UPS View** | Direct jump to live charging/discharging speeds and dual 10-bracket historical rate tables |
 | **`3`** | **Chronicle View** | Direct jump to searchable daily event log & timeline |
 | **`e`** | **Instant AI Export** | Formats today's activity into Markdown and copies to clipboard or disk |
+| **`s`** | **Toggle Process Sort** | Toggle process sorting between **CPU %** and **RAM (RSS)** *(Telemetry tab)* |
+| **`c` / `m`** | **Direct Sort** | Sort processes directly by **CPU %** (`c`) or **RAM Usage** (`m`) *(Telemetry tab)* |
 | **`K`** | **Terminate Process** | Opens red confirmation modal to send `SIGTERM` to selected process *(Telemetry tab)* |
 | **`/`** | **Fuzzy Search** | Filter today's timeline events in real-time *(Chronicle tab)* |
 | **`j` / `↓`** | **Select Next** | Move selection down through processes or scroll timeline |
