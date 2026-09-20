@@ -50,18 +50,19 @@ src/main.rs ──> Clap CLI
   pub struct BatterySnapshot { pub state: PowerState, pub capacity: u8, pub rate_pct_per_hour: Option<f64>, ... }
   ```
 
-### `src/infra/system.rs` (Role: infra, Lines: ~293)
-- **Responsibility**: Linux `/proc` and `/sys` filesystem telemetry extraction and `ps` process monitoring.
+### `src/infra/system.rs` (Role: infra, Lines: ~357)
+- **Responsibility**: Linux `/proc` and `/sys` filesystem telemetry extraction and `ps` process monitoring with runtime name resolution.
 - **Imports**: `crate::domain::models::{ProcessItem, SystemMetrics}`, `std::process::Command`
 - **Public Functions & Signatures**:
   ```rust
   pub fn read_system_metrics() -> SystemMetrics;
   pub fn read_top_processes(limit: usize) -> Vec<ProcessItem>;
   pub fn parse_process_line(line: &str, num_cpus: usize) -> Option<ProcessItem>;
+  pub fn resolve_process_name(comm: &str, args: &str) -> String;
   pub fn normalize_process_cpu(raw_cpu: f64, num_cpus: usize) -> f64;
   ```
 - **Consumers**: `src/infra.rs`
-- **Side Effects / I/O**: Reads `/proc/meminfo`, `/proc/stat`, `/proc/uptime`, `/sys/class/thermal`, executes `ps -eo pid,comm,%cpu,%mem,rss`
+- **Side Effects / I/O**: Reads `/proc/meminfo`, `/proc/stat`, `/proc/uptime`, `/sys/class/thermal`, executes `ps -eo pid,%cpu,%mem,rss,comm,args`
 
 ### `src/infra/battery.rs` (Role: infra, Lines: ~194)
 - **Responsibility**: Live battery sensor parsing and 10-bracket discharge rate tracking.
@@ -141,6 +142,8 @@ cargo fmt --check
 ```
 
 ## 6. Recent Iteration Changes
+- **2026-09-20 (v0.1.15)**:
+  - `src/infra/system.rs`: Added `resolve_process_name()` to dynamically detect interpreter scripts/modules (e.g. `python3: spotiflac_bot`, `node: app.js`) from command args.
 - **2026-09-20 (v0.1.14)**:
   - `src/domain/models.rs`: Added `mem_summary()` helper to format memory as `Size (Percentage)` (e.g. `100MB (8.4%)`).
   - `src/tui/views/telemetry.rs`: Merged `MEM %` and `RAM` into unified `Memory (RAM)` column displaying `mem_summary()`.

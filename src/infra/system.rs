@@ -182,17 +182,58 @@ pub fn normalize_process_cpu(raw_cpu: f64, num_cpus: usize) -> f64 {
     (raw_cpu / divisor).clamp(0.0, 100.0)
 }
 
+pub fn resolve_process_name(comm: &str, args: &str) -> String {
+    let lower = comm.to_lowercase();
+    let is_interpreter = lower.starts_with("python")
+        || lower == "node"
+        || lower == "ruby"
+        || lower == "perl"
+        || lower == "bash"
+        || lower == "sh";
+
+    if !is_interpreter || args.trim().is_empty() {
+        return comm.to_string();
+    }
+
+    let tokens: Vec<&str> = args.split_whitespace().collect();
+    for (i, token) in tokens.iter().enumerate() {
+        if *token == "-m" {
+            if let Some(module) = tokens.get(i + 1) {
+                return format!("{comm}: {module}");
+            }
+        }
+    }
+
+    for token in tokens.iter().skip(1) {
+        if token.starts_with('-') {
+            continue;
+        }
+        let file_name = std::path::Path::new(token)
+            .file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or(token);
+        return format!("{comm}: {file_name}");
+    }
+
+    comm.to_string()
+}
+
 pub fn parse_process_line(line: &str, num_cpus: usize) -> Option<ProcessItem> {
     let parts: Vec<&str> = line.split_whitespace().collect();
     if parts.len() < 5 {
         return None;
     }
     let pid = parts[0].parse::<u32>().ok()?;
-    let len = parts.len();
-    let rss_kb = parts[len - 1].parse::<u64>().unwrap_or(0);
-    let mem_percent = parts[len - 2].parse::<f64>().unwrap_or(0.0);
-    let raw_cpu = parts[len - 3].parse::<f64>().unwrap_or(0.0);
-    let name = parts[1..len - 3].join(" ");
+    let raw_cpu = parts[1].parse::<f64>().unwrap_or(0.0);
+    let mem_percent = parts[2].parse::<f64>().unwrap_or(0.0);
+    let rss_kb = parts[3].parse::<u64>().unwrap_or(0);
+    let comm = parts[4];
+    let args = if parts.len() > 5 {
+        parts[5..].join(" ")
+    } else {
+        String::new()
+    };
+    let name = resolve_process_name(comm, &args);
     let cpu_percent = normalize_process_cpu(raw_cpu, num_cpus);
     let mem_bytes = rss_kb.saturating_mul(1024);
 
@@ -207,7 +248,7 @@ pub fn parse_process_line(line: &str, num_cpus: usize) -> Option<ProcessItem> {
 
 fn fetch_ps_processes(sort_arg: &str, sample_size: usize, num_cpus: usize) -> Vec<ProcessItem> {
     let Ok(out) = Command::new("ps")
-        .args(["-eo", "pid,comm,%cpu,%mem,rss", sort_arg])
+        .args(["-eo", "pid,%cpu,%mem,rss,comm,args", sort_arg])
         .output()
     else {
         return Vec::new();
@@ -274,8 +315,31 @@ mod tests {
     }
 
     #[test]
+    fn test_resolve_process_name() {
+        assert_eq!(
+            resolve_process_name(
+                "python3",
+                "/home/neko/spotiflac-bot/.venv/bin/python3 -m spotiflac_bot"
+            ),
+            "python3: spotiflac_bot"
+        );
+        assert_eq!(
+            resolve_process_name("python3", "python3 /var/www/script.py --verbose"),
+            "python3: script.py"
+        );
+        assert_eq!(
+            resolve_process_name("node", "node /app/server.js"),
+            "node: server.js"
+        );
+        assert_eq!(
+            resolve_process_name("jellyfin", "/jellyfin/jellyfin"),
+            "jellyfin"
+        );
+    }
+
+    #[test]
     fn test_parse_process_line() {
-        let line = " 2471 jellyfin 1.2 4.6 344052";
+        let line = "2471 1.2 4.6 344052 jellyfin /jellyfin/jellyfin";
         let proc = parse_process_line(line, 1).expect("must parse valid ps line");
         assert_eq!(proc.pid, 2471);
         assert_eq!(proc.name, "jellyfin");
@@ -283,10 +347,10 @@ mod tests {
         assert!((proc.mem_percent - 4.6).abs() < 0.01);
         assert_eq!(proc.mem_bytes, 344052 * 1024);
 
-        let space_line = " 920178 tmux: server 0.5 0.2 6360";
-        let proc2 = parse_process_line(space_line, 1).expect("must parse multi-word command name");
-        assert_eq!(proc2.name, "tmux: server");
-        assert_eq!(proc2.mem_bytes, 6360 * 1024);
+        let py_line = "163989 0.0 2.9 223436 python3 /venv/bin/python3 -m spotiflac_bot";
+        let proc2 = parse_process_line(py_line, 1).expect("must parse python line");
+        assert_eq!(proc2.name, "python3: spotiflac_bot");
+        assert_eq!(proc2.mem_bytes, 223436 * 1024);
 
         assert!(parse_process_line("invalid", 1).is_none());
     }
