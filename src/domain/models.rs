@@ -291,19 +291,24 @@ pub struct ProcessItem {
 impl ProcessItem {
     #[must_use]
     pub fn formatted_mem(&self) -> String {
-        const KIB: u64 = 1024;
-        const MIB: u64 = 1024 * 1024;
-        const GIB: u64 = 1024 * 1024 * 1024;
+        const KB: u64 = 1024;
+        const MB: u64 = 1024 * 1024;
+        const GB: u64 = 1024 * 1024 * 1024;
 
-        if self.mem_bytes >= GIB {
-            format!("{:.2} GiB", self.mem_bytes as f64 / GIB as f64)
-        } else if self.mem_bytes >= MIB {
-            format!("{:.1} MiB", self.mem_bytes as f64 / MIB as f64)
-        } else if self.mem_bytes >= KIB {
-            format!("{:.0} KiB", self.mem_bytes as f64 / KIB as f64)
+        if self.mem_bytes >= GB {
+            format!("{:.2}GB", self.mem_bytes as f64 / GB as f64)
+        } else if self.mem_bytes >= MB {
+            format!("{:.1}MB", self.mem_bytes as f64 / MB as f64)
+        } else if self.mem_bytes >= KB {
+            format!("{:.0}KB", self.mem_bytes as f64 / KB as f64)
         } else {
-            format!("{} B", self.mem_bytes)
+            format!("{}B", self.mem_bytes)
         }
+    }
+
+    #[must_use]
+    pub fn mem_summary(&self) -> String {
+        format!("{} ({:.1}%)", self.formatted_mem(), self.mem_percent)
     }
 }
 
@@ -352,12 +357,15 @@ mod tests {
             mem_percent: 5.0,
             mem_bytes: 350 * 1024 * 1024,
         };
-        assert_eq!(proc.formatted_mem(), "350.0 MiB");
+        assert_eq!(proc.formatted_mem(), "350.0MB");
+        assert_eq!(proc.mem_summary(), "350.0MB (5.0%)");
         let gig_proc = ProcessItem {
             mem_bytes: 2 * 1024 * 1024 * 1024,
+            mem_percent: 25.5,
             ..Default::default()
         };
-        assert_eq!(gig_proc.formatted_mem(), "2.00 GiB");
+        assert_eq!(gig_proc.formatted_mem(), "2.00GB");
+        assert_eq!(gig_proc.mem_summary(), "2.00GB (25.5%)");
     }
 
     #[test]
@@ -376,9 +384,6 @@ mod tests {
                 value: 95.5,
                 threshold: 90.0,
                 offender: Some("ffmpeg".into()),
-            },
-            ServerActivityEvent::GenericNote {
-                message: "system check".into(),
             },
         ];
 

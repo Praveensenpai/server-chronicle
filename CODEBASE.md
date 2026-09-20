@@ -34,7 +34,7 @@ src/main.rs ──> Clap CLI
 - **Public Functions & Signatures**:
   ```rust
   impl ProcessSortMode { pub fn label(self) -> &'static str; pub fn toggle(self) -> Self; }
-  impl ProcessItem { pub fn formatted_mem(&self) -> String; }
+  impl ProcessItem { pub fn formatted_mem(&self) -> String; pub fn mem_summary(&self) -> String; }
   impl SystemMetrics { pub fn mem_percent(&self) -> f64; pub fn disk_percent(&self) -> f64; }
   ```
 - **Consumers**: `src/infra/system.rs`, `src/infra.rs`, `src/daemon.rs`, `src/tui/app.rs`, `src/tui/views/telemetry.rs`, `src/api/export.rs`
@@ -141,7 +141,11 @@ cargo fmt --check
 ```
 
 ## 6. Recent Iteration Changes
-- **2026-09-20**:
+- **2026-09-20 (v0.1.14)**:
+  - `src/domain/models.rs`: Added `mem_summary()` helper to format memory as `Size (Percentage)` (e.g. `100MB (8.4%)`).
+  - `src/tui/views/telemetry.rs`: Merged `MEM %` and `RAM` into unified `Memory (RAM)` column displaying `mem_summary()`.
+  - `src/daemon.rs`: Formatted RAM spike alerts to log both size and percentage using `mem_summary()`.
+- **2026-09-20 (v0.1.13)**:
   - `src/domain/models.rs`: Added `ProcessSortMode` enum (`Cpu`, `Ram`) and `mem_bytes` field to `ProcessItem` with `formatted_mem()` helper.
   - `src/infra/system.rs`: Updated `read_top_processes()` and `parse_process_line()` to query `rss` and combine top CPU and RAM processes.
   - `src/tui/app.rs`: Added `proc_sort_mode` state, `sort_process_list`, `toggle_process_sort`, and `set_process_sort`.

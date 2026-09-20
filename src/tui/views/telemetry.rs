@@ -226,8 +226,7 @@ fn render_processes(
                 format!("{cursor}{}", p.pid),
                 p.name.clone(),
                 format!("{:.1}%", p.cpu_percent),
-                format!("{:.1}%", p.mem_percent),
-                p.formatted_mem(),
+                p.mem_summary(),
             ])
             .style(style)
         })
@@ -238,14 +237,13 @@ fn render_processes(
         rows,
         [
             Constraint::Length(10),     // PID
-            Constraint::Percentage(40), // Process Name
+            Constraint::Percentage(50), // Process Name
             Constraint::Length(10),     // CPU %
-            Constraint::Length(10),     // MEM %
-            Constraint::Length(12),     // RAM Usage
+            Constraint::Length(18),     // Memory (RAM)
         ],
     )
     .header(
-        Row::new(vec!["  PID", "Process Name", "CPU %", "MEM %", "RAM"]).style(
+        Row::new(vec!["  PID", "Process Name", "CPU %", "Memory (RAM)"]).style(
             Style::default()
                 .fg(COLOR_SECONDARY)
                 .add_modifier(Modifier::BOLD),

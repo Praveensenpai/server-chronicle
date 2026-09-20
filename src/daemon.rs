@@ -261,7 +261,7 @@ fn check_resource_spikes(snap: &ServerSnapshot) {
             .top_processes
             .iter()
             .max_by(|a, b| a.mem_percent.total_cmp(&b.mem_percent))
-            .map(|p| format!("{} (PID {}) at {:.1}% MEM", p.name, p.pid, p.mem_percent));
+            .map(|p| format!("{} (PID {}) using {}", p.name, p.pid, p.mem_summary()));
 
         record_and_log(ServerActivityEvent::ResourceSpike {
             metric: "RAM Usage".to_string(),
