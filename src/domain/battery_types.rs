@@ -1,4 +1,3 @@
-use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -40,13 +39,6 @@ pub struct BracketStat {
     pub duration_secs: u64,
     pub rate_pct_per_hour: f64,
     pub completed: bool,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct BatterySample {
-    pub timestamp: DateTime<Utc>,
-    pub capacity: u8,
-    pub state: PowerState,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

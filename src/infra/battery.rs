@@ -7,7 +7,7 @@ use std::path::{Path, PathBuf};
 use crate::domain::battery_types::{
     calculate_health_percent, calculate_rate_pct_per_hour, charging_bracket_index,
     discharging_bracket_index, init_default_brackets, init_default_discharge_brackets,
-    BatterySample, BatterySnapshot, BracketStat, PowerState,
+    BatterySnapshot, BracketStat, PowerState,
 };
 
 const BATTERY_SYS_PATH: &str = "/sys/class/power_supply/BAT0";
@@ -28,8 +28,6 @@ pub struct PersistentBatteryTracker {
     pub brackets: Vec<BracketStat>,
     #[serde(default = "init_default_discharge_brackets")]
     pub discharge_brackets: Vec<BracketStat>,
-    #[serde(default)]
-    pub samples: Vec<BatterySample>,
 }
 
 impl PersistentBatteryTracker {
@@ -45,7 +43,6 @@ impl PersistentBatteryTracker {
             current_bracket_start_time: None,
             brackets: init_default_brackets(),
             discharge_brackets: init_default_discharge_brackets(),
-            samples: Vec::new(),
         }
     }
 
@@ -85,17 +82,6 @@ impl PersistentBatteryTracker {
             self.current_bracket_start_cap = current_cap;
             self.current_bracket_start_time = Some(now);
             self.last_state = state_str.clone();
-        }
-
-        self.samples.push(BatterySample {
-            timestamp: now,
-            capacity: current_cap,
-            state: state.clone(),
-        });
-
-        // Retain rolling 1 hour of samples (max 720 samples at 5s intervals)
-        if self.samples.len() > 720 {
-            self.samples.remove(0);
         }
 
         // Bracket tracking
@@ -207,28 +193,30 @@ impl PersistentBatteryTracker {
         if *state != PowerState::Charging && *state != PowerState::Discharging {
             return 0.0;
         }
-        if self.samples.len() < 2 {
-            return 0.0;
-        }
         let now = Utc::now();
-        let state_samples: Vec<&BatterySample> =
-            self.samples.iter().filter(|s| s.state == *state).collect();
-
-        if state_samples.len() < 2 {
-            return 0.0;
+        if let Some(start_time) = self.current_bracket_start_time {
+            let duration_secs = (now - start_time).num_seconds().max(0) as u64;
+            if duration_secs >= 20 && self.current_bracket_start_cap != current_cap {
+                return calculate_rate_pct_per_hour(
+                    self.current_bracket_start_cap,
+                    current_cap,
+                    duration_secs,
+                )
+                .min(150.0);
+            }
         }
-
-        let oldest = state_samples
-            .iter()
-            .find(|s| (now - s.timestamp).num_minutes() <= 30)
-            .copied()
-            .unwrap_or(state_samples[0]);
-
-        let duration_secs = (now - oldest.timestamp).num_seconds().max(0) as u64;
-        if duration_secs < 20 {
-            return 0.0;
+        if let Some(session_start) = self.session_start_time {
+            let duration_secs = (now - session_start).num_seconds().max(0) as u64;
+            if duration_secs >= 30 && self.session_start_cap != current_cap {
+                return calculate_rate_pct_per_hour(
+                    self.session_start_cap,
+                    current_cap,
+                    duration_secs,
+                )
+                .min(150.0);
+            }
         }
-        calculate_rate_pct_per_hour(oldest.capacity, current_cap, duration_secs).min(150.0)
+        0.0
     }
 }
 

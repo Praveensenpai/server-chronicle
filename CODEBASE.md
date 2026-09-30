@@ -142,6 +142,9 @@ cargo fmt --check
 ```
 
 ## 6. Recent Iteration Changes
+- **2026-09-30 (v0.1.18)**:
+  - `src/domain/battery_types.rs`: Removed `BatterySample` struct and unused chrono imports.
+  - `src/infra/battery.rs`: Removed rolling historical samples buffer from `PersistentBatteryTracker` and updated `current_speed_pct_per_hour` to compute speed directly from discrete bracket and session durations without storing raw sample histories to disk.
 - **2026-09-30 (v0.1.17)**:
   - `src/domain/battery_types.rs`: Added `charging_bracket_index()` and `discharging_bracket_index()` helpers with comprehensive unit tests for discrete bracket index resolution.
   - `src/infra/battery.rs`: Fixed bracket telemetry state machine to track discrete bracket entry time/capacity, preventing time pollution across power transitions and stuck 0-10% brackets.
