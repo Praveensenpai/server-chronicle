@@ -119,35 +119,42 @@ fn check_power_events(bat: &BatterySnapshot, last_state: &mut PowerState, last_c
     }
 
     if bat.capacity != *last_cap {
-        if bat.capacity.is_multiple_of(10) || bat.capacity == 100 || bat.capacity == 0 {
-            emit_bracket_event(bat);
-        }
+        emit_bracket_events_if_any(bat, *last_cap);
         *last_cap = bat.capacity;
     }
 }
 
-fn emit_bracket_event(bat: &BatterySnapshot) {
+fn emit_bracket_events_if_any(bat: &BatterySnapshot, prev_cap: u8) {
     if bat.state == PowerState::Charging {
-        let bracket_idx = (bat.capacity as usize / 10).saturating_sub(1);
-        if let Some(b) = bat.brackets.get(bracket_idx) {
-            if b.duration_secs > 0 {
-                record_and_log(ServerActivityEvent::BatteryBracketCompleted {
-                    bracket: b.label.clone(),
-                    duration_secs: b.duration_secs,
-                    rate_pct_per_hour: b.rate_pct_per_hour,
-                });
+        let prev_idx = crate::domain::battery_types::charging_bracket_index(prev_cap);
+        let curr_idx = crate::domain::battery_types::charging_bracket_index(bat.capacity);
+        if bat.capacity > prev_cap && prev_idx < curr_idx {
+            for k in prev_idx..curr_idx {
+                if let Some(b) = bat.brackets.get(k) {
+                    if b.completed && b.duration_secs > 0 {
+                        record_and_log(ServerActivityEvent::BatteryBracketCompleted {
+                            bracket: b.label.clone(),
+                            duration_secs: b.duration_secs,
+                            rate_pct_per_hour: b.rate_pct_per_hour,
+                        });
+                    }
+                }
             }
         }
     } else if bat.state == PowerState::Discharging {
-        let drop = 100usize.saturating_sub(bat.capacity as usize);
-        let bracket_idx = (drop / 10).saturating_sub(1);
-        if let Some(b) = bat.discharge_brackets.get(bracket_idx) {
-            if b.duration_secs > 0 {
-                record_and_log(ServerActivityEvent::BatteryBracketCompleted {
-                    bracket: b.label.clone(),
-                    duration_secs: b.duration_secs,
-                    rate_pct_per_hour: b.rate_pct_per_hour,
-                });
+        let prev_idx = crate::domain::battery_types::discharging_bracket_index(prev_cap);
+        let curr_idx = crate::domain::battery_types::discharging_bracket_index(bat.capacity);
+        if bat.capacity < prev_cap && prev_idx < curr_idx {
+            for k in prev_idx..curr_idx {
+                if let Some(b) = bat.discharge_brackets.get(k) {
+                    if b.completed && b.duration_secs > 0 {
+                        record_and_log(ServerActivityEvent::BatteryBracketCompleted {
+                            bracket: b.label.clone(),
+                            duration_secs: b.duration_secs,
+                            rate_pct_per_hour: b.rate_pct_per_hour,
+                        });
+                    }
+                }
             }
         }
     }

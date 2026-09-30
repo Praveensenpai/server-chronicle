@@ -130,6 +130,29 @@ pub fn calculate_rate_pct_per_hour(start_cap: u8, end_cap: u8, duration_secs: u6
 }
 
 #[must_use]
+pub fn charging_bracket_index(cap: u8) -> usize {
+    if cap >= 100 {
+        9
+    } else {
+        (cap as usize / 10).min(9)
+    }
+}
+
+#[must_use]
+pub fn discharging_bracket_index(cap: u8) -> usize {
+    if cap >= 100 {
+        0
+    } else {
+        let drop = 100usize.saturating_sub(cap as usize);
+        if drop == 0 {
+            0
+        } else {
+            ((drop.saturating_sub(1)) / 10).min(9)
+        }
+    }
+}
+
+#[must_use]
 pub fn calculate_health_percent(full_uah: u64, design_uah: u64) -> f64 {
     if design_uah == 0 {
         return 100.0;
@@ -186,5 +209,23 @@ mod tests {
         assert_eq!(discharge_b.len(), 10);
         assert_eq!(discharge_b[0].label, "100% - 90%");
         assert_eq!(discharge_b[9].label, "10% - 0%");
+    }
+
+    #[test]
+    fn test_bracket_indices() {
+        assert_eq!(charging_bracket_index(0), 0);
+        assert_eq!(charging_bracket_index(9), 0);
+        assert_eq!(charging_bracket_index(10), 1);
+        assert_eq!(charging_bracket_index(56), 5);
+        assert_eq!(charging_bracket_index(99), 9);
+        assert_eq!(charging_bracket_index(100), 9);
+
+        assert_eq!(discharging_bracket_index(100), 0);
+        assert_eq!(discharging_bracket_index(91), 0);
+        assert_eq!(discharging_bracket_index(90), 0);
+        assert_eq!(discharging_bracket_index(89), 1);
+        assert_eq!(discharging_bracket_index(56), 4);
+        assert_eq!(discharging_bracket_index(1), 9);
+        assert_eq!(discharging_bracket_index(0), 9);
     }
 }

@@ -112,21 +112,45 @@ fn print_battery_summary() {
         println!("  • Estimated {label}: {left} minutes");
     }
 
-    print_bracket_table("📈 Charging Brackets Breakdown", &b.brackets);
+    let active_charge_idx = if b.state == domain::battery_types::PowerState::Charging {
+        Some(domain::battery_types::charging_bracket_index(b.capacity))
+    } else {
+        None
+    };
+
+    let active_discharge_idx = if b.state == domain::battery_types::PowerState::Discharging {
+        Some(domain::battery_types::discharging_bracket_index(b.capacity))
+    } else {
+        None
+    };
+
+    print_bracket_table(
+        "📈 Charging Brackets Breakdown",
+        &b.brackets,
+        active_charge_idx,
+    );
     print_bracket_table(
         "📉 Discharging / Drain Brackets Breakdown",
         &b.discharge_brackets,
+        active_discharge_idx,
     );
     println!("🌸 ========================================= 🌸");
 }
 
-fn print_bracket_table(title: &str, brackets: &[domain::battery_types::BracketStat]) {
+fn print_bracket_table(
+    title: &str,
+    brackets: &[domain::battery_types::BracketStat],
+    active_idx: Option<usize>,
+) {
     println!("\n  {title}:");
-    for br in brackets {
-        let status = if br.completed {
+    for (idx, br) in brackets.iter().enumerate() {
+        let is_active = active_idx == Some(idx);
+        let status = if is_active {
+            "▶ In Progress"
+        } else if br.completed {
             "✔ Done"
         } else if br.duration_secs > 0 {
-            "▶ In Progress"
+            "⚡ Recorded"
         } else {
             "Pending"
         };
@@ -135,13 +159,14 @@ fn print_bracket_table(title: &str, brackets: &[domain::battery_types::BracketSt
         } else {
             "--".to_string()
         };
+        let time_str = if br.duration_secs > 0 {
+            format!("{:4}m {:2}s", br.duration_secs / 60, br.duration_secs % 60)
+        } else {
+            "    --    ".to_string()
+        };
         println!(
-            "    • {:12} : {:4}m {:2}s | {:10} | {}",
-            br.label,
-            br.duration_secs / 60,
-            br.duration_secs % 60,
-            rate_str,
-            status
+            "    • {:12} : {} | {:10} | {}",
+            br.label, time_str, rate_str, status
         );
     }
 }

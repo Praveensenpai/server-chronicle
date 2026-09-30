@@ -142,6 +142,12 @@ cargo fmt --check
 ```
 
 ## 6. Recent Iteration Changes
+- **2026-09-30 (v0.1.17)**:
+  - `src/domain/battery_types.rs`: Added `charging_bracket_index()` and `discharging_bracket_index()` helpers with comprehensive unit tests for discrete bracket index resolution.
+  - `src/infra/battery.rs`: Fixed bracket telemetry state machine to track discrete bracket entry time/capacity, preventing time pollution across power transitions and stuck 0-10% brackets.
+  - `src/tui/views/battery_view.rs`: Highlighted `▶ In Progress` exclusively for the active bracket during active charge/discharge transitions, rendering idle states as `Holding Charge` or `--`.
+  - `src/main.rs`: Refactored CLI battery summary to display `--` for unreached brackets and active bracket indicators.
+  - `src/daemon.rs`: Added bracket boundary change detection and event emission on bracket completion.
 - **2026-09-20 (v0.1.16)**:
   - `src/tui/views/telemetry.rs`: Implemented windowed viewport scrolling in `render_processes()` to seamlessly browse all processes via `j`/`k` regardless of terminal window height, with `(X/Y)` position indicator.
 - **2026-09-20 (v0.1.15)**:

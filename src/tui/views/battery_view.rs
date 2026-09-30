@@ -211,6 +211,22 @@ fn render_speed_stats(frame: &mut Frame, area: Rect, b: &BatterySnapshot) {
 }
 
 fn render_brackets_table(frame: &mut Frame, area: Rect, b: &BatterySnapshot) {
+    let active_charge_idx = if b.state == PowerState::Charging {
+        Some(crate::domain::battery_types::charging_bracket_index(
+            b.capacity,
+        ))
+    } else {
+        None
+    };
+
+    let active_discharge_idx = if b.state == PowerState::Discharging {
+        Some(crate::domain::battery_types::discharging_bracket_index(
+            b.capacity,
+        ))
+    } else {
+        None
+    };
+
     if area.width >= 90 {
         let cols = Layout::default()
             .direction(Direction::Horizontal)
@@ -224,6 +240,7 @@ fn render_brackets_table(frame: &mut Frame, area: Rect, b: &BatterySnapshot) {
             "Charge",
             &b.brackets,
             COLOR_PRIMARY,
+            active_charge_idx,
         );
         render_single_bracket_table(
             frame,
@@ -232,6 +249,7 @@ fn render_brackets_table(frame: &mut Frame, area: Rect, b: &BatterySnapshot) {
             "Drain",
             &b.discharge_brackets,
             COLOR_SECONDARY,
+            active_discharge_idx,
         );
     } else if b.state == PowerState::Discharging {
         render_single_bracket_table(
@@ -241,6 +259,7 @@ fn render_brackets_table(frame: &mut Frame, area: Rect, b: &BatterySnapshot) {
             "Drain",
             &b.discharge_brackets,
             COLOR_SECONDARY,
+            active_discharge_idx,
         );
     } else {
         render_single_bracket_table(
@@ -250,6 +269,7 @@ fn render_brackets_table(frame: &mut Frame, area: Rect, b: &BatterySnapshot) {
             "Charge",
             &b.brackets,
             COLOR_PRIMARY,
+            active_charge_idx,
         );
     }
 }
@@ -261,21 +281,27 @@ fn render_single_bracket_table(
     header_label: &str,
     brackets: &[crate::domain::battery_types::BracketStat],
     header_color: ratatui::style::Color,
+    active_idx: Option<usize>,
 ) {
     let rows: Vec<Row> = brackets
         .iter()
-        .map(|br| {
+        .enumerate()
+        .map(|(idx, br)| {
             let mins = br.duration_secs / 60;
             let secs = br.duration_secs % 60;
-            let (status_text, style) = if br.completed {
-                ("✔ Completed", Style::default().fg(COLOR_SUCCESS))
-            } else if br.duration_secs > 0 {
+            let is_active = active_idx == Some(idx);
+
+            let (status_text, style) = if is_active {
                 (
                     "▶ In Progress",
                     Style::default()
                         .fg(COLOR_WARNING)
                         .add_modifier(Modifier::BOLD),
                 )
+            } else if br.completed {
+                ("✔ Completed", Style::default().fg(COLOR_SUCCESS))
+            } else if br.duration_secs > 0 {
+                ("⚡ Recorded", Style::default().fg(COLOR_PRIMARY))
             } else {
                 ("Pending", Style::default().fg(COLOR_MUTED))
             };
@@ -286,9 +312,15 @@ fn render_single_bracket_table(
                 "--".to_string()
             };
 
+            let time_str = if br.duration_secs > 0 {
+                format!("{mins}m {secs}s")
+            } else {
+                "--".to_string()
+            };
+
             Row::new(vec![
                 br.label.clone(),
-                format!("{mins}m {secs}s"),
+                time_str,
                 rate_str,
                 status_text.to_string(),
             ])
