@@ -1,7 +1,7 @@
 use ratatui::{
     layout::{Constraint, Direction, Layout, Rect},
     style::{Modifier, Style},
-    widgets::{Block, Borders, Paragraph, Row, Table},
+    widgets::{Block, Borders, Paragraph},
     Frame,
 };
 
@@ -16,15 +16,15 @@ pub fn render_battery_view(frame: &mut Frame, area: Rect, battery: &BatterySnaps
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
-            Constraint::Length(7), // Big battery gauge & health card
-            Constraint::Length(6), // Live calculated speed & UPS runtime stats
-            Constraint::Min(10),   // 10-bracket table
+            Constraint::Length(7), // Battery gauge & health card
+            Constraint::Length(6), // Live rate & UPS estimate stats
+            Constraint::Min(8),    // Detailed electrical & operational diagnostics
         ])
         .split(area);
 
     render_header_card(frame, chunks[0], battery);
     render_speed_stats(frame, chunks[1], battery);
-    render_brackets_table(frame, chunks[2], battery);
+    render_power_diagnostics(frame, chunks[2], battery);
 }
 
 fn render_header_card(frame: &mut Frame, area: Rect, b: &BatterySnapshot) {
@@ -33,6 +33,11 @@ fn render_header_card(frame: &mut Frame, area: Rect, b: &BatterySnapshot) {
         .constraints([Constraint::Percentage(60), Constraint::Percentage(40)])
         .split(area);
 
+    render_battery_gauge(frame, cols[0], b);
+    render_health_card(frame, cols[1], b);
+}
+
+fn render_battery_gauge(frame: &mut Frame, area: Rect, b: &BatterySnapshot) {
     let bat_color = if b.capacity > 50 {
         COLOR_SUCCESS
     } else if b.capacity > 20 {
@@ -46,21 +51,24 @@ fn render_header_card(frame: &mut Frame, area: Rect, b: &BatterySnapshot) {
     } else {
         "🚨 ON BATTERY (UPS MODE)"
     };
+
     render_compact_gauge(
         frame,
-        cols[0],
+        area,
         format!(" 🔋 Battery Capacity • {ac_badge} "),
         bat_color,
         b.capacity as u16,
         format!("{}% — {}", b.capacity, b.state.as_str()),
     );
+}
 
-    // Health Card
+fn render_health_card(frame: &mut Frame, area: Rect, b: &BatterySnapshot) {
     let health_color = if b.health_percent > 80.0 {
         COLOR_SUCCESS
     } else {
         COLOR_WARNING
     };
+
     let mut health_text = vec![
         ratatui::text::Line::from(vec![
             ratatui::text::Span::raw("Battery Health: "),
@@ -103,7 +111,7 @@ fn render_header_card(frame: &mut Frame, area: Rect, b: &BatterySnapshot) {
             .border_style(Style::default().fg(COLOR_BORDER))
             .title(" 🩺 Hardware Health & Wear "),
     );
-    frame.render_widget(p, cols[1]);
+    frame.render_widget(p, area);
 }
 
 fn render_speed_stats(frame: &mut Frame, area: Rect, b: &BatterySnapshot) {
@@ -116,6 +124,12 @@ fn render_speed_stats(frame: &mut Frame, area: Rect, b: &BatterySnapshot) {
         ])
         .split(area);
 
+    render_rate_card(frame, cols[0], b);
+    render_estimate_card(frame, cols[1], b);
+    render_cycle_card(frame, cols[2], b);
+}
+
+fn render_rate_card(frame: &mut Frame, area: Rect, b: &BatterySnapshot) {
     let sign = if b.state == PowerState::Discharging {
         "-"
     } else {
@@ -132,7 +146,7 @@ fn render_speed_stats(frame: &mut Frame, area: Rect, b: &BatterySnapshot) {
         "--".to_string()
     };
 
-    let p1 = Paragraph::new(vec![
+    let p = Paragraph::new(vec![
         ratatui::text::Line::from(ratatui::text::Span::styled(
             speed_label,
             Style::default()
@@ -150,9 +164,10 @@ fn render_speed_stats(frame: &mut Frame, area: Rect, b: &BatterySnapshot) {
             .border_style(Style::default().fg(COLOR_BORDER))
             .title(" ⚡ Calculated Rate (x% - y% / time) "),
     );
-    frame.render_widget(p1, cols[0]);
+    frame.render_widget(p, area);
+}
 
-    // Estimate Card
+fn render_estimate_card(frame: &mut Frame, area: Rect, b: &BatterySnapshot) {
     let (time_title, time_val) = match b.state {
         PowerState::Charging => (
             " ⏱ Estimated Time to 100% ",
@@ -169,7 +184,7 @@ fn render_speed_stats(frame: &mut Frame, area: Rect, b: &BatterySnapshot) {
         _ => (" ⏱ Status ", "Connected to Mains (Full)".to_string()),
     };
 
-    let p2 = Paragraph::new(ratatui::text::Line::from(ratatui::text::Span::styled(
+    let p = Paragraph::new(ratatui::text::Line::from(ratatui::text::Span::styled(
         time_val,
         Style::default()
             .fg(COLOR_WARNING)
@@ -181,9 +196,10 @@ fn render_speed_stats(frame: &mut Frame, area: Rect, b: &BatterySnapshot) {
             .border_style(Style::default().fg(COLOR_BORDER))
             .title(time_title),
     );
-    frame.render_widget(p2, cols[1]);
+    frame.render_widget(p, area);
+}
 
-    // Full 0% to 100% calculation
+fn render_cycle_card(frame: &mut Frame, area: Rect, b: &BatterySnapshot) {
     let full_est = if b.calculated_rate_pct_hr > 0.1 {
         let total_mins = ((100.0 / b.calculated_rate_pct_hr) * 60.0) as u64;
         format!(
@@ -195,7 +211,7 @@ fn render_speed_stats(frame: &mut Frame, area: Rect, b: &BatterySnapshot) {
         "--".to_string()
     };
 
-    let p3 = Paragraph::new(ratatui::text::Line::from(ratatui::text::Span::styled(
+    let p = Paragraph::new(ratatui::text::Line::from(ratatui::text::Span::styled(
         full_est,
         Style::default()
             .fg(COLOR_SECONDARY)
@@ -207,149 +223,137 @@ fn render_speed_stats(frame: &mut Frame, area: Rect, b: &BatterySnapshot) {
             .border_style(Style::default().fg(COLOR_BORDER))
             .title(" 🔄 Full 0% ➔ 100% Cycle Speed "),
     );
-    frame.render_widget(p3, cols[2]);
+    frame.render_widget(p, area);
 }
 
-fn render_brackets_table(frame: &mut Frame, area: Rect, b: &BatterySnapshot) {
-    let active_charge_idx = if b.state == PowerState::Charging {
-        Some(crate::domain::battery_types::charging_bracket_index(
-            b.capacity,
-        ))
-    } else {
-        None
-    };
+fn render_power_diagnostics(frame: &mut Frame, area: Rect, b: &BatterySnapshot) {
+    let cols = Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints([Constraint::Percentage(50), Constraint::Percentage(50)])
+        .split(area);
 
-    let active_discharge_idx = if b.state == PowerState::Discharging {
-        Some(crate::domain::battery_types::discharging_bracket_index(
-            b.capacity,
-        ))
-    } else {
-        None
-    };
-
-    if area.width >= 90 {
-        let cols = Layout::default()
-            .direction(Direction::Horizontal)
-            .constraints([Constraint::Percentage(50), Constraint::Percentage(50)])
-            .split(area);
-
-        render_single_bracket_table(
-            frame,
-            cols[0],
-            " 📈 Charging Brackets (0% ➔ 100%) ",
-            "Charge",
-            &b.brackets,
-            COLOR_PRIMARY,
-            active_charge_idx,
-        );
-        render_single_bracket_table(
-            frame,
-            cols[1],
-            " 📉 Discharging / Drain (100% ➔ 0%) ",
-            "Drain",
-            &b.discharge_brackets,
-            COLOR_SECONDARY,
-            active_discharge_idx,
-        );
-    } else if b.state == PowerState::Discharging {
-        render_single_bracket_table(
-            frame,
-            area,
-            " 📉 Discharging / Drain Brackets (100% ➔ 0%) ",
-            "Drain",
-            &b.discharge_brackets,
-            COLOR_SECONDARY,
-            active_discharge_idx,
-        );
-    } else {
-        render_single_bracket_table(
-            frame,
-            area,
-            " 📈 Charging Brackets (0% ➔ 100%) ",
-            "Charge",
-            &b.brackets,
-            COLOR_PRIMARY,
-            active_charge_idx,
-        );
-    }
+    render_electrical_specs_card(frame, cols[0], b);
+    render_operational_diagnostics_card(frame, cols[1], b);
 }
 
-fn render_single_bracket_table(
-    frame: &mut Frame,
-    area: Rect,
-    title: &str,
-    header_label: &str,
-    brackets: &[crate::domain::battery_types::BracketStat],
-    header_color: ratatui::style::Color,
-    active_idx: Option<usize>,
-) {
-    let rows: Vec<Row> = brackets
-        .iter()
-        .enumerate()
-        .map(|(idx, br)| {
-            let mins = br.duration_secs / 60;
-            let secs = br.duration_secs % 60;
-            let is_active = active_idx == Some(idx);
+fn render_electrical_specs_card(frame: &mut Frame, area: Rect, b: &BatterySnapshot) {
+    let volt_str = if b.voltage_now_uv > 0 {
+        format!("{:.2} V", b.voltage_now_uv as f64 / 1_000_000.0)
+    } else {
+        "--".to_string()
+    };
 
-            let (status_text, style) = if is_active {
-                (
-                    "▶ In Progress",
-                    Style::default()
-                        .fg(COLOR_WARNING)
-                        .add_modifier(Modifier::BOLD),
-                )
-            } else if br.completed {
-                ("✔ Completed", Style::default().fg(COLOR_SUCCESS))
-            } else if br.duration_secs > 0 {
-                ("⚡ Recorded", Style::default().fg(COLOR_PRIMARY))
-            } else {
-                ("Pending", Style::default().fg(COLOR_MUTED))
-            };
+    let power_str = if let Some(uw) = b.power_now_uw {
+        format!("{:.2} W", uw as f64 / 1_000_000.0)
+    } else {
+        "--".to_string()
+    };
 
-            let rate_str = if br.rate_pct_per_hour > 0.01 {
-                format!("{:.1}%/hr", br.rate_pct_per_hour)
-            } else {
-                "--".to_string()
-            };
+    let remaining_uah = b.charge_full_uah.saturating_sub(b.charge_now_uah);
 
-            let time_str = if br.duration_secs > 0 {
-                format!("{mins}m {secs}s")
-            } else {
-                "--".to_string()
-            };
+    let electrical_lines = vec![
+        ratatui::text::Line::from(vec![
+            ratatui::text::Span::raw("Current Voltage:     "),
+            ratatui::text::Span::styled(
+                volt_str,
+                Style::default()
+                    .fg(COLOR_PRIMARY)
+                    .add_modifier(Modifier::BOLD),
+            ),
+        ]),
+        ratatui::text::Line::from(vec![
+            ratatui::text::Span::raw("Live Power Flow:     "),
+            ratatui::text::Span::styled(
+                power_str,
+                Style::default()
+                    .fg(COLOR_SECONDARY)
+                    .add_modifier(Modifier::BOLD),
+            ),
+        ]),
+        ratatui::text::Line::from(vec![
+            ratatui::text::Span::raw("Current Energy:      "),
+            ratatui::text::Span::styled(
+                format!("{} mAh", b.charge_now_uah / 1000),
+                Style::default().fg(COLOR_TEXT),
+            ),
+        ]),
+        ratatui::text::Line::from(vec![
+            ratatui::text::Span::raw("Remaining to Full:   "),
+            ratatui::text::Span::styled(
+                format!("{} mAh", remaining_uah / 1000),
+                Style::default().fg(COLOR_MUTED),
+            ),
+        ]),
+    ];
 
-            Row::new(vec![
-                br.label.clone(),
-                time_str,
-                rate_str,
-                status_text.to_string(),
-            ])
-            .style(style)
-        })
-        .collect();
-
-    let table = Table::new(
-        rows,
-        [
-            Constraint::Percentage(28),
-            Constraint::Percentage(24),
-            Constraint::Percentage(24),
-            Constraint::Percentage(24),
-        ],
-    )
-    .header(
-        Row::new(vec![header_label, "Time", "Speed", "Status"]).style(
-            Style::default()
-                .fg(header_color)
-                .add_modifier(Modifier::BOLD),
-        ),
-    )
-    .block(
+    let p = Paragraph::new(electrical_lines).block(
         Block::default()
             .borders(Borders::ALL)
             .border_style(Style::default().fg(COLOR_BORDER))
-            .title(title),
+            .title(" ⚡ Electrical Specifications "),
     );
+    frame.render_widget(p, area);
+}
 
-    frame.render_widget(table, area);
+fn render_operational_diagnostics_card(frame: &mut Frame, area: Rect, b: &BatterySnapshot) {
+    let wear_pct = (100.0 - b.health_percent).max(0.0);
+    let health_grade = if b.health_percent >= 90.0 {
+        ("Optimal / Excellent", COLOR_SUCCESS)
+    } else if b.health_percent >= 75.0 {
+        ("Normal / Good", COLOR_SECONDARY)
+    } else if b.health_percent >= 50.0 {
+        ("Degraded / Fair", COLOR_WARNING)
+    } else {
+        ("Critical / Service Required", COLOR_DANGER)
+    };
+
+    let (source_text, source_color) = if b.ac_online {
+        ("AC Mains (Connected)", COLOR_SUCCESS)
+    } else {
+        ("Battery (UPS Operating)", COLOR_WARNING)
+    };
+
+    let diagnostics_lines = vec![
+        ratatui::text::Line::from(vec![
+            ratatui::text::Span::raw("Power Source:        "),
+            ratatui::text::Span::styled(
+                source_text,
+                Style::default()
+                    .fg(source_color)
+                    .add_modifier(Modifier::BOLD),
+            ),
+        ]),
+        ratatui::text::Line::from(vec![
+            ratatui::text::Span::raw("Condition Assessment:"),
+            ratatui::text::Span::styled(
+                health_grade.0,
+                Style::default()
+                    .fg(health_grade.1)
+                    .add_modifier(Modifier::BOLD),
+            ),
+        ]),
+        ratatui::text::Line::from(vec![
+            ratatui::text::Span::raw("Wear Level:          "),
+            ratatui::text::Span::styled(
+                format!("{wear_pct:.1}% capacity lost"),
+                Style::default().fg(if wear_pct > 20.0 {
+                    COLOR_WARNING
+                } else {
+                    COLOR_MUTED
+                }),
+            ),
+        ]),
+        ratatui::text::Line::from(vec![
+            ratatui::text::Span::raw("Operating State:     "),
+            ratatui::text::Span::styled(b.state.as_str(), Style::default().fg(COLOR_TEXT)),
+        ]),
+    ];
+
+    let p = Paragraph::new(diagnostics_lines).block(
+        Block::default()
+            .borders(Borders::ALL)
+            .border_style(Style::default().fg(COLOR_BORDER))
+            .title(" 🩺 Operational Diagnostics "),
+    );
+    frame.render_widget(p, area);
 }
