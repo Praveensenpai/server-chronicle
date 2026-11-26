@@ -231,6 +231,10 @@ fn check_ssh_events(snap: &ServerSnapshot, known: &mut HashMap<String, Instant>)
 }
 
 fn check_torrent_events(snap: &ServerSnapshot, known: &mut HashMap<String, f64>) {
+    let active_names: std::collections::HashSet<&str> =
+        snap.torrents.iter().map(|t| t.name.as_str()).collect();
+    known.retain(|name, _| active_names.contains(name.as_str()));
+
     for t in &snap.torrents {
         let prev_prog = known.get(&t.name).copied().unwrap_or(0.0);
         let state_lower = t.state.to_lowercase();
@@ -343,5 +347,26 @@ mod tests {
             "restarting"
         );
         assert_eq!(simplify_container_status("unknown status"), "stopped");
+    }
+    #[test]
+    fn test_check_torrent_events_prunes_removed_torrents() {
+        let mut known = HashMap::from([
+            ("old-torrent".to_string(), 100.0),
+            ("active-torrent".to_string(), 50.0),
+        ]);
+        let snap = ServerSnapshot {
+            torrents: vec![crate::domain::models::TorrentSnapshot {
+                name: "active-torrent".to_string(),
+                progress: 60.0,
+                state: "downloading".to_string(),
+                size: 1024,
+                dlspeed: 0,
+                upspeed: 0,
+            }],
+            ..Default::default()
+        };
+        check_torrent_events(&snap, &mut known);
+        assert!(!known.contains_key("old-torrent"));
+        assert_eq!(known.get("active-torrent"), Some(&60.0));
     }
 }
